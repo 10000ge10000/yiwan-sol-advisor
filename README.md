@@ -8,6 +8,10 @@ Sol Advisor is a Codex-native architect workflow for capability-routed software
 delivery. The primary session stays focused on requirements, architecture, specs, and
 verification while native Codex custom-agent threads handle implementation and review.
 
+## Go deeper
+
+I write [**Attention Heads**](https://attentionheads.substack.com/?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor) — deep, evidence-backed writing on AI, cognition, and agentic engineering. The **Agentic Engineering Field Notes** series is where I publish practical advice on the craft of using AI. [Subscribe](https://attentionheads.substack.com/subscribe?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor) to get new posts to your inbox.
+
 | Lane | Native agent type | Pinned profile | Use it for |
 |---|---|---|---|
 | Orchestrator | Primary session | GPT-5.6 Sol / High | Requirements, architecture, decomposition, routing, and acceptance |
