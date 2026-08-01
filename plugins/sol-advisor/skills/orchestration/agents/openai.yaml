@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sol Advisor Orchestration"
+  short_description: "Route builds and require fresh Sol review"
+  default_prompt: "Use $orchestration to architect this task, route implementation, verify the evidence, and obtain a fresh Sol verdict."
