@@ -1,7 +1,7 @@
 {
   "name": "sol-advisor",
-  "version": "0.1.0",
-  "description": "Codex-native architect workflow that routes implementation to Luna or Terra and requires a fresh Sol review before completion.",
+  "version": "0.2.0",
+  "description": "Codex-native architect workflow that routes through separately installed, role-pinned Luna and Terra custom agents and requires a fresh read-only Sol review.",
   "author": {
     "name": "Daniel McAteer",
     "url": "https://github.com/DannyMac180"
@@ -18,8 +18,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Sol Advisor",
-    "shortDescription": "Architect with Sol, implement with Luna or Terra, and review with Sol.",
-    "longDescription": "Sol Advisor gives Codex a capability-routed delivery workflow: GPT-5.6 Sol orchestrates, GPT-5.6 Luna implements routine work, GPT-5.6 Terra handles harder implementation, and a fresh Sol reviewer must approve the final diff.",
+    "shortDescription": "Architect with Sol, implement with role-pinned Luna or Terra, and review with Sol.",
+    "longDescription": "Sol Advisor gives Codex a capability-routed delivery workflow: GPT-5.6 Sol orchestrates, separately installed role-pinned custom agents send routine work to Luna and harder work to Terra, and a fresh read-only Sol reviewer must approve the final diff.",
     "developerName": "Daniel McAteer",
     "category": "Productivity",
     "capabilities": [
