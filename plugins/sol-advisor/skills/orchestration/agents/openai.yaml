@@ -1,4 +1,4 @@
 interface:
   display_name: "Sol Advisor Orchestration"
-  short_description: "Route role-pinned custom agents and require fresh Sol review"
-  default_prompt: "Use $orchestration to preflight Sol Advisor's installed custom agents, route implementation, verify the evidence, and obtain a fresh Sol verdict."
+  short_description: "Route all implementation through Terra / High, then require fresh Sol review"
+  default_prompt: "Use $orchestration to preflight Sol Advisor's Terra / High and Sol companion roles; route implementation, verify the evidence, and obtain a fresh Sol verdict."
