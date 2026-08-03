@@ -1,7 +1,7 @@
 {
   "name": "sol-advisor",
-  "version": "0.3.0",
-  "description": "Codex-native architect workflow with one role-pinned Terra / High implementation agent and a fresh requested-read-only Sol review.",
+  "version": "0.4.0",
+  "description": "Codex-native architect workflow with a native Terra / High lane plus an explicit opt-in, user-visible Luna task lane, with primary-session verification and acceptance.",
   "author": {"name": "Daniel McAteer", "url": "https://github.com/DannyMac180"},
   "homepage": "https://github.com/DannyMac180/sol-advisor#readme",
   "repository": "https://github.com/DannyMac180/sol-advisor",
@@ -10,12 +10,12 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Sol Advisor",
-    "shortDescription": "Architect with Sol, implement with role-pinned Terra / High, and review with Sol.",
-    "longDescription": "Sol Advisor gives Codex a delivery workflow: GPT-5.6 Sol orchestrates, one separately installed role-pinned GPT-5.6 Terra / High agent handles all implementation, and a fresh requested-read-only Sol reviewer must approve the final diff.",
+    "shortDescription": "Orchestrate with Sol, use native Terra / High or opt-in Luna tasks, and verify the accepted diff.",
+    "longDescription": "Sol Advisor gives Codex two explicit delivery modes: GPT-5.6 Sol keeps architecture, decomposition, verification, and acceptance in the primary session; the native mode uses a separately installed GPT-5.6 Terra / High role and a fresh Sol reviewer, while the opt-in Luna mode creates user-visible GPT-5.6 Luna / Max tasks through list_projects, list_threads, create_thread, wait_threads, read_thread, and send_message_to_thread and keeps review, corrections, PR authorization, and dependent-stack ordering in the primary session.",
     "developerName": "Daniel McAteer",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://github.com/DannyMac180/sol-advisor",
-    "defaultPrompt": ["Use Sol Advisor to build this feature and verify it before completion.", "Route all implementation through Sol Advisor's Terra / High agent.", "Review this deliverable with a fresh Sol advisor before reporting done."]
+    "defaultPrompt": ["Use Sol Advisor's native lane to build this feature, verify it, and obtain the fresh Sol review before completion.", "Use the Luna task lane only when I explicitly authorize it; create user-visible GPT-5.6 Luna / Max tasks through Codex app task tools and keep primary review and acceptance in this task."]
   }
 }
