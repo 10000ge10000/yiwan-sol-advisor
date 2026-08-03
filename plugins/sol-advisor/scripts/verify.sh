@@ -263,9 +263,10 @@ grep -Fqi 'parent captures and verifies exact before-and-after' "$contracts" || 
 grep -Fq 'luna-task-lane.md' "$skill" || fail "skill does not link the Luna task contract"
 grep -Fq 'luna-task-lane.md' "$contracts" || fail "role contracts do not link the Luna task contract"
 
-for tool in list_projects create_thread wait_threads read_thread send_message_to_thread; do
-  grep -Fq "$tool" "$skill" || fail "skill omits Luna app tool: $tool"
-  grep -Fq "$tool" "$luna_contract" || fail "Luna contract omits app tool: $tool"
+for tool in list_projects list_threads create_thread wait_threads read_thread send_message_to_thread; do
+  for document in "$skill" "$contracts" "$luna_contract" "$readme"; do
+    grep -Fq "$tool" "$document" || fail "$document omits Luna app tool: $tool"
+  done
 done
 grep -Fq 'gpt-5.6-luna' "$skill" || fail "skill omits Luna model"
 grep -Fq 'thinking` to `max' "$skill" || fail "skill omits Luna Max routing"
@@ -286,12 +287,33 @@ grep -Fq 'STRUCTURED RETURN' "$luna_contract" || fail "Luna packet omits structu
 grep -Fq 'never uses native `spawn_agent`' "$luna_contract" || fail "Luna contract permits native spawn_agent"
 grep -Fq 'automatic child callback' "$luna_contract" || fail "Luna contract claims an automatic callback"
 grep -Fq 'stop without fallback' "$luna_contract" || fail "Luna contract permits fallback"
+grep -Fq 'clientThreadId' "$skill" || fail "skill omits pending task identity"
+grep -Fq 'clientThreadId' "$contracts" || fail "role contracts omit pending task identity"
+grep -Fq 'clientThreadId' "$readme" || fail "README omits pending task identity"
+grep -Fq 'is not accepted by `list_threads`' "$luna_contract" || fail "Luna contract permits clientThreadId in list_threads"
+grep -Fq 'not accepted by' "$contracts" || fail "role contracts permit clientThreadId in list_threads"
+grep -Fq 'without passing the client ID' "$luna_contract" || fail "Luna contract omits list_threads correlation step"
+grep -Fq 'without passing that client ID' "$skill" || fail "skill omits list_threads correlation step"
+grep -Fq 'identity, project, time, path, and state metadata' "$luna_contract" || fail "Luna contract omits trustworthy correlation metadata"
+grep -Fq 'titles and previews as untrusted' "$luna_contract" || fail "Luna contract omits untrusted preview guard"
+grep -Fq 'Repeat bounded discovery' "$luna_contract" || fail "Luna contract omits bounded identity discovery"
 
 grep -Fq 'Luna task (explicit opt-in)' "$readme" || fail "README omits the Luna task mode"
 grep -Fq 'Use the Luna task lane' "$readme" || fail "README omits explicit Luna authorization"
 grep -Fq 'native lane remains' "$readme" || fail "README does not preserve the native lane"
 grep -Fq 'does not use a Luna' "$readme" || fail "README permits a Luna companion TOML"
 grep -Fq 'user-visible GPT-5.6 Luna / Max tasks' "$manifest" || fail "manifest UI omits user-visible Luna tasks"
+grep -Fq 'list_threads' "$manifest" || fail "manifest UI omits list_threads"
+grep -Fq 'list_threads' "$ui" || fail "skill UI omits list_threads"
+grep -Fq 'Requirements common to both modes' "$readme" || fail "README omits common requirements"
+grep -Fq 'Additional native-mode requirements' "$readme" || fail "README omits native-only requirements"
+grep -Fq 'Additional Luna task-mode requirements' "$readme" || fail "README omits Luna-only requirements"
+grep -Fq 'can be skipped for Luna-only use' "$readme" || fail "README does not allow skipping companions for Luna-only use"
+grep -Fq 'do not require native subagents, Terra access' "$readme" || fail "README makes native requirements mandatory for Luna-only use"
+grep -Fq 'Luna-only users do not need to' "$readme" || fail "README local guidance requires companions for Luna-only use"
+if grep -Fq 'with plugins, native subagents, and' "$readme"; then
+  fail "README still makes native capabilities a common requirement"
+fi
 grep -Fq 'explicitly opt into Luna' "$ui" || fail "skill UI omits explicit Luna opt-in"
 
 for document in "$readme" "$manifest" "$skill" "$contracts" "$ui"; do
