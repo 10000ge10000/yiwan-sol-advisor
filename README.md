@@ -225,6 +225,172 @@ sh "$plugin_dir/scripts/inspect-agent-runtime.sh" <native-subagent-thread-id>
 - Unsupported web/mobile/skills-only surfaces are prompt-only.
 - No live cross-client behavioral claim is made without a real client test.
 
+## Developer smoke test: Cursor
+
+Use this procedure from the `agent-plugin-conformance` branch before claiming live
+Cursor support. It follows [Cursor's documented local-plugin flow](https://cursor.com/docs/plugins#test-plugins-locally)
+and uses project scope plus a disposable workspace so it does not touch global agent
+files. Record the Cursor version, chosen model IDs, observed subagent details, and any
+fallback or permission message.
+
+### 1. Validate and load the local plugin
+
+From this repository:
+
+~~~sh
+git switch agent-plugin-conformance
+bun install --frozen-lockfile
+bun run ci
+
+repo_root="$(git rev-parse --show-toplevel)"
+plugin_src="$repo_root/plugins/sol-advisor"
+plugin_link="$HOME/.cursor/plugins/local/sol-advisor"
+mkdir -p "$(dirname "$plugin_link")"
+if test -e "$plugin_link" || test -L "$plugin_link"; then
+  echo "Refusing to replace existing Cursor local plugin: $plugin_link" >&2
+  exit 1
+fi
+ln -s "$plugin_src" "$plugin_link"
+printf 'Loaded plugin root: %s -> %s\n' "$plugin_link" "$plugin_src"
+~~~
+
+In Cursor, run **Developer: Reload Window**. Open **Customize → Plugins** and confirm
+Sol Advisor is enabled. Confirm the `sol-advisor` MCP server is connected and exposes
+eight tools. A missing `bun`, unresolved `${PLUGIN_ROOT}`/`${PLUGIN_DATA}`, or a
+non-private plugin-data directory must produce a visible failure rather than a silent
+fallback.
+
+### 2. Create an isolated workspace
+
+~~~sh
+tmp_base="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+smoke_dir="$(mktemp -d "$tmp_base/sol-advisor-cursor-smoke.XXXXXX")"
+git -C "$smoke_dir" init
+printf 'Open this folder in Cursor: %s\n' "$smoke_dir"
+~~~
+
+Open the printed folder in Cursor. Keep `smoke_dir`, `plugin_src`, and `plugin_link` in
+that terminal for the later checks and cleanup.
+
+### 3. Run setup in the parent chat
+
+Open a new Cursor Agent chat and say:
+
+~~~text
+Run the Sol Advisor setup skill in this parent chat. Configure Cursor project scope
+for this exact workspace: <paste smoke_dir>. Ask one question at a time. I will copy
+exact model IDs from Cursor's model picker. Show the full adapter preview and stop
+before installation until I repeat the exact token.
+~~~
+
+Choose exact model IDs that are currently available to your Cursor account. Where the
+model supports it, choose an effort value such as `high`; the generated Cursor model
+value should use Cursor's documented `model-id[effort=high]` syntax. Before confirming,
+verify that the preview contains only these three destinations and their complete
+contents:
+
+~~~text
+<smoke_dir>/.cursor/agents/sol-advisor-routine.md
+<smoke_dir>/.cursor/agents/sol-advisor-high.md
+<smoke_dir>/.cursor/agents/sol-advisor-advisor.md
+~~~
+
+In the terminal, confirm preview was non-mutating:
+
+~~~sh
+test ! -e "$smoke_dir/.cursor/agents/sol-advisor-routine.md"
+test ! -e "$smoke_dir/.cursor/agents/sol-advisor-high.md"
+test ! -e "$smoke_dir/.cursor/agents/sol-advisor-advisor.md"
+~~~
+
+Repeat the exact `INSTALL <nonce>` token in chat. Do not use a generic “yes.” Confirm
+all three files now exist, contain `sol-advisor-managed:v1`, and no other file was
+created under `.cursor/agents`:
+
+~~~sh
+for name in routine high advisor; do
+  test -f "$smoke_dir/.cursor/agents/sol-advisor-$name.md"
+done
+test "$(find "$smoke_dir/.cursor/agents" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+find "$smoke_dir/.cursor/agents" -maxdepth 1 -type f -print -exec grep -H 'sol-advisor-managed:v1' {} \;
+~~~
+
+### 4. Verify discovery, routing, and review
+
+Run **Developer: Reload Window** again and start a new Agent chat. Cursor custom
+subagents support explicit `/name` invocation. Perform these checks:
+
+1. Invoke `/sol-advisor-routine` to create `cursor-smoke.txt` containing one known
+   line. Confirm its subagent details show the configured model/options, or record any
+   Cursor fallback warning.
+2. Invoke `/sol-advisor-high` to append a second known line while checking the file for
+   a deliberately described edge case. Confirm its details show the configured high
+   role model/options, or record any fallback warning.
+3. Before invoking the advisor, run `advisor_before="$(git -C "$smoke_dir" status --short)"`
+   in the same terminal. Invoke `/sol-advisor-advisor` to review the file without
+   changing it. Confirm the agent is shown as read-only, then run
+   `test "$(git -C "$smoke_dir" status --short)" = "$advisor_before"` to prove the
+   advisor created no additional change.
+4. Ask: `Use the Sol Advisor orchestration skill to append one line to
+   cursor-smoke.txt through the routine role, verify the diff, and obtain the advisor
+   verdict.` Confirm setup does not repeat, the parent remains the orchestrator, and
+   the configured routine and advisor roles are used.
+5. In the same parent chat, ask Sol Advisor to call `get_setup_status` and
+   `validate_configuration` for the exact smoke workspace. Both should report a ready,
+   valid project profile.
+
+Cursor documents that it may substitute a compatible model when a pin is restricted
+or unavailable. Treat any such substitution as an observed host limitation, not as a
+successful exact-model routing claim.
+
+### 5. Uninstall and clean up
+
+In the parent chat, say:
+
+~~~text
+Use the Sol Advisor setup skill to uninstall this active project adapter. Preview the
+managed files first and do not remove anything until I repeat the exact uninstall token.
+~~~
+
+Repeat the exact token, then verify the three managed files are gone. Finally remove
+only the local-plugin symlink created above and the guarded disposable workspace:
+
+~~~sh
+if test -L "$plugin_link" && test "$(readlink "$plugin_link")" = "$plugin_src"; then
+  rm "$plugin_link"
+else
+  echo "Refusing to remove unexpected plugin path: $plugin_link" >&2
+  exit 1
+fi
+case "$smoke_dir" in
+  "$tmp_base"/sol-advisor-cursor-smoke.*) rm -rf -- "$smoke_dir" ;;
+  *) echo "Refusing to remove unexpected workspace: $smoke_dir" >&2; exit 1 ;;
+esac
+~~~
+
+A passing smoke test requires successful plugin/MCP discovery, lazy parent-chat setup,
+non-mutating preview, exact-token installation, all three native subagents, observable
+routine/high/advisor routing, unchanged-file advisor review, validated configuration, and
+exact managed-file uninstall. Add this evidence to the draft PR before making it ready
+for review:
+
+~~~text
+Cursor version:
+Plugin + MCP discovered (8 tools): pass/fail
+Setup stayed in parent chat: pass/fail
+Configured routine/high/advisor model values:
+Preview paths/content inspected: pass/fail
+No files before exact token: pass/fail
+Three managed files after token: pass/fail
+Observed routine routing/model/fallback:
+Observed high routing/model/fallback:
+Observed advisor routing/read-only/no-diff:
+Orchestration reused saved setup: pass/fail
+validate_configuration result:
+Exact uninstall + cleanup: pass/fail
+Notes/screenshots/log references:
+~~~
+
 ## Local testing and development
 
 ~~~sh

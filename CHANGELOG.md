@@ -5,7 +5,9 @@ All notable changes to Sol Advisor are documented here. This project follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- Developer-run Cursor smoke-test procedure with guarded setup, evidence, and cleanup steps.
 
 ## [0.5.0] - 2026-08-07
 
