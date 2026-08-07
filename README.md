@@ -77,6 +77,61 @@ codex plugin marketplace upgrade sol-advisor
 codex plugin add sol-advisor@sol-advisor
 ~~~
 
+### Cursor installation from a local clone
+
+Cursor officially supports loading Agent Plugins from `~/.cursor/plugins/local`.
+Until Sol Advisor has a reviewed Marketplace listing, use a guarded symlink to the
+Agent Plugin root inside this repository:
+
+~~~sh
+git switch agent-plugin-conformance
+bun install --frozen-lockfile
+bun run ci
+
+repo_root="$(git rev-parse --show-toplevel)"
+plugin_src="$repo_root/plugins/sol-advisor"
+plugin_link="$HOME/.cursor/plugins/local/sol-advisor"
+mkdir -p "$(dirname "$plugin_link")"
+if test -e "$plugin_link" || test -L "$plugin_link"; then
+  echo "Refusing to replace existing Cursor local plugin: $plugin_link" >&2
+  exit 1
+fi
+ln -s "$plugin_src" "$plugin_link"
+printf 'Loaded Sol Advisor: %s -> %s\n' "$plugin_link" "$plugin_src"
+~~~
+
+In Cursor:
+
+1. Run **Developer: Reload Window**.
+2. Open **Customize → Plugins** and confirm **Sol Advisor** is enabled.
+3. Confirm the `sol-advisor` MCP server connects and exposes eight tools. If Cursor
+   cannot find `bun` or rejects `${PLUGIN_DATA}`, preserve the exact error as smoke-test
+   evidence; do not silently substitute another runtime or loosen directory permissions.
+4. Open the project you want to use for the test and start a new Agent chat.
+5. Ask: `Run the Sol Advisor setup skill in this parent chat. Use Cursor project scope,
+   ask one question at a time, and stop after showing the complete adapter preview.`
+6. Copy exact model IDs from Cursor's model picker. Inspect all three generated files,
+   then repeat the exact `INSTALL <nonce>` token—not a generic “yes.”
+7. Reload Cursor again. The native roles should be invocable as
+   `/sol-advisor-routine`, `/sol-advisor-high`, and `/sol-advisor-advisor`.
+
+Before removing the local plugin, use the setup skill to uninstall its generated
+adapter files with the exact uninstall token. Then remove only the symlink created
+above:
+
+~~~sh
+if test -L "$plugin_link" && test "$(readlink "$plugin_link")" = "$plugin_src"; then
+  rm "$plugin_link"
+else
+  echo "Refusing to remove unexpected plugin path: $plugin_link" >&2
+  exit 1
+fi
+~~~
+
+For the complete disposable-workspace procedure and evidence checklist, follow
+[Developer smoke test: Cursor](#developer-smoke-test-cursor). The local loading method
+is documented by [Cursor's plugin guide](https://cursor.com/docs/plugins#test-plugins-locally).
+
 For other clients, use only that client's documented Agent Plugins v1 UI or local
 package mechanism; Sol Advisor does not claim a universal install command.
 
