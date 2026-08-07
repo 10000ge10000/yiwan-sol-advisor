@@ -111,11 +111,17 @@ receipt for guarded cleanup.
 
 In Cursor:
 
-1. Open `workspace` and run **Developer: Reload Window**.
-2. Select that workspace under **Customize → MCPs**.
-3. Open `sol-advisor` and enable its workspace source. Cursor keeps new project MCP
-   sources disabled until the user explicitly enables them.
+1. Open the exact `workspace` folder and run **Developer: Reload Window**.
+2. Under **Customize → MCPs**, use Customize's own scope dropdown to select that exact
+   workspace. The active project shown in Cursor Agents can be different; do not select
+   a similarly named repository.
+3. Open `sol-advisor` and enable its workspace source. Cursor keeps new or recreated
+   project MCP sources disabled until the user explicitly enables them.
 4. Confirm the local environment is **Connected** and all eight tools are enabled.
+   If it remains **Disconnected**, or Cursor's shared MCP process leaves every server
+   disconnected, fully quit Cursor—not merely the window—reopen the exact workspace,
+   return to its Customize scope, and explicitly enable the source again. Do not change
+   the command, paths, permissions, or canonical plugin manifest to force a connection.
 5. If needed, verify `loadUserLocalPlugin sol-advisor loaded` in the `Cursor Plugins`
    output/log. Do not require a card under the user-level Plugins filter.
 6. Start a new Agent chat and ask:
@@ -325,13 +331,20 @@ the repository's canonical `mcp.json` remains unchanged for conformant clients.
 
 Open the printed folder in Cursor and run **Developer: Reload Window**. Then:
 
-1. Open **Customize → MCPs** and select the `sol-advisor-cursor-smoke…` workspace.
-2. Open `sol-advisor` and explicitly enable its workspace source.
+1. Open **Customize → MCPs** and, in Customize's own scope dropdown, select the exact
+   `sol-advisor-cursor-smoke…` workspace. Do not select the similarly named source
+   repository, even if Cursor Agents currently shows it as the active project.
+2. Open `sol-advisor` and explicitly enable its workspace source. Reinstalling or
+   recreating `.cursor/mcp.json` can cause Cursor to require this consent again.
 3. Confirm **Local — Connected** and these eight enabled tools:
    `get_setup_status`, `get_preferences`, `save_preferences`,
    `render_client_adapter`, `install_client_adapter`, `uninstall_client_adapter`,
    `validate_configuration`, and `reset_configuration`.
-4. Confirm `loadUserLocalPlugin sol-advisor loaded` in the `Cursor Plugins` output/log.
+4. If the source remains **Disconnected**, or all MCP servers become disconnected,
+   fully quit Cursor, reopen the printed workspace, select its Customize scope again,
+   and re-enable the source. A window reload alone did not recover the shared MCP process
+   in the live Cursor 3.15.6 smoke test. Preserve the failure logs before restarting.
+5. Confirm `loadUserLocalPlugin sol-advisor loaded` in the `Cursor Plugins` output/log.
 
 Workspace MCP sources are disabled by default; enabling this source is an intentional
 user security boundary. The connected identifier should be project-scoped (for example,
