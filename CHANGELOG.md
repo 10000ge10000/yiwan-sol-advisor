@@ -9,6 +9,10 @@ All notable changes to Sol Advisor are documented here. This project follows
 
 - Cursor local-clone installation guide plus developer smoke-test procedure with guarded setup, evidence, and cleanup steps.
 
+### Fixed
+
+- Cursor 3.15.6 local installation now uses a verified directory copy instead of an externally resolved symlink and documents GUI-process Bun `PATH` recovery.
+
 ## [0.5.0] - 2026-08-07
 
 ### Added

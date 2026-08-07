@@ -80,8 +80,10 @@ codex plugin add sol-advisor@sol-advisor
 ### Cursor installation from a local clone
 
 Cursor officially supports loading Agent Plugins from `~/.cursor/plugins/local`.
-Until Sol Advisor has a reviewed Marketplace listing, use a guarded symlink to the
-Agent Plugin root inside this repository:
+Until Sol Advisor has a reviewed Marketplace listing, copy the Agent Plugin root into
+that directory. Cursor 3.15.6 rejects a symlink whose resolved target is outside the
+local-plugin directory even though Cursor's documentation currently recommends
+symlinks, so do not use a repository symlink for this test.
 
 ~~~sh
 git switch agent-plugin-conformance
@@ -90,23 +92,40 @@ bun run ci
 
 repo_root="$(git rev-parse --show-toplevel)"
 plugin_src="$repo_root/plugins/sol-advisor"
-plugin_link="$HOME/.cursor/plugins/local/sol-advisor"
-mkdir -p "$(dirname "$plugin_link")"
-if test -e "$plugin_link" || test -L "$plugin_link"; then
-  echo "Refusing to replace existing Cursor local plugin: $plugin_link" >&2
+plugin_dir="$HOME/.cursor/plugins/local/sol-advisor"
+mkdir -p "$(dirname "$plugin_dir")"
+if test -e "$plugin_dir" || test -L "$plugin_dir"; then
+  echo "Refusing to replace existing Cursor local plugin: $plugin_dir" >&2
   exit 1
 fi
-ln -s "$plugin_src" "$plugin_link"
-printf 'Loaded Sol Advisor: %s -> %s\n' "$plugin_link" "$plugin_src"
+cp -R "$plugin_src" "$plugin_dir"
+test -f "$plugin_dir/plugin.json"
+test -f "$plugin_dir/mcp.json"
+printf 'Copied Sol Advisor into Cursor local plugins: %s\n' "$plugin_dir"
 ~~~
 
 In Cursor:
 
-1. Run **Developer: Reload Window**.
-2. Open **Customize → Plugins** and confirm **Sol Advisor** is enabled.
-3. Confirm the `sol-advisor` MCP server connects and exposes eight tools. If Cursor
-   cannot find `bun` or rejects `${PLUGIN_DATA}`, preserve the exact error as smoke-test
-   evidence; do not silently substitute another runtime or loosen directory permissions.
+1. Run **Developer: Reload Window** from Cursor's IDE command palette.
+2. Do not require a card under **Customize → Plugins**: Cursor 3.15.6 can load a
+   direct local plugin without listing it on that tab. If needed, confirm the load in
+   Cursor's `Cursor Plugins` output/log: `loadUserLocalPlugin sol-advisor loaded`.
+3. Confirm the `sol-advisor` MCP server connects and exposes eight tools. If its log
+   reports `spawn bun ENOENT`, Cursor was launched without the directory containing
+   Bun on its process `PATH`. Fully quit Cursor, then relaunch its executable from the
+   same terminal where `command -v bun` succeeds:
+
+   ~~~sh
+   bun_bin="$(command -v bun)"
+   cursor_app="$(mdfind 'kMDItemCFBundleIdentifier == "com.todesktop.230313mzl4w4u92"' | head -n 1)"
+   cursor_bin="${cursor_app%/}/Contents/MacOS/Cursor"
+   test -x "$bun_bin"
+   test -x "$cursor_bin"
+   PATH="$(dirname "$bun_bin"):$PATH" "$cursor_bin" "$repo_root" >/tmp/cursor-sol-advisor.log 2>&1 &
+   ~~~
+
+   This launch command is for macOS. Preserve any other `${PLUGIN_DATA}` or MCP error
+   as smoke-test evidence; do not substitute another runtime or loosen permissions.
 4. Open the project you want to use for the test and start a new Agent chat.
 5. Ask: `Run the Sol Advisor setup skill in this parent chat. Use Cursor project scope,
    ask one question at a time, and stop after showing the complete adapter preview.`
@@ -116,14 +135,14 @@ In Cursor:
    `/sol-advisor-routine`, `/sol-advisor-high`, and `/sol-advisor-advisor`.
 
 Before removing the local plugin, use the setup skill to uninstall its generated
-adapter files with the exact uninstall token. Then remove only the symlink created
-above:
+adapter files with the exact uninstall token. Then remove only an unchanged copy of
+this plugin:
 
 ~~~sh
-if test -L "$plugin_link" && test "$(readlink "$plugin_link")" = "$plugin_src"; then
-  rm "$plugin_link"
+if test -d "$plugin_dir" && ! test -L "$plugin_dir" && diff -qr "$plugin_src" "$plugin_dir" >/dev/null; then
+  rm -rf -- "$plugin_dir"
 else
-  echo "Refusing to remove unexpected plugin path: $plugin_link" >&2
+  echo "Refusing to remove changed or unexpected plugin path: $plugin_dir" >&2
   exit 1
 fi
 ~~~
@@ -299,21 +318,29 @@ bun run ci
 
 repo_root="$(git rev-parse --show-toplevel)"
 plugin_src="$repo_root/plugins/sol-advisor"
-plugin_link="$HOME/.cursor/plugins/local/sol-advisor"
-mkdir -p "$(dirname "$plugin_link")"
-if test -e "$plugin_link" || test -L "$plugin_link"; then
-  echo "Refusing to replace existing Cursor local plugin: $plugin_link" >&2
+plugin_dir="$HOME/.cursor/plugins/local/sol-advisor"
+mkdir -p "$(dirname "$plugin_dir")"
+if test -e "$plugin_dir" || test -L "$plugin_dir"; then
+  echo "Refusing to replace existing Cursor local plugin: $plugin_dir" >&2
   exit 1
 fi
-ln -s "$plugin_src" "$plugin_link"
-printf 'Loaded plugin root: %s -> %s\n' "$plugin_link" "$plugin_src"
+cp -R "$plugin_src" "$plugin_dir"
+test -f "$plugin_dir/plugin.json"
+test -f "$plugin_dir/mcp.json"
+printf 'Copied plugin root into: %s\n' "$plugin_dir"
 ~~~
 
-In Cursor, run **Developer: Reload Window**. Open **Customize → Plugins** and confirm
-Sol Advisor is enabled. Confirm the `sol-advisor` MCP server is connected and exposes
-eight tools. A missing `bun`, unresolved `${PLUGIN_ROOT}`/`${PLUGIN_DATA}`, or a
-non-private plugin-data directory must produce a visible failure rather than a silent
-fallback.
+Use a real directory copy for this test. Cursor 3.15.6 rejects external symlink targets
+under `~/.cursor/plugins/local`, despite the current symlink example in Cursor's docs.
+
+In Cursor's IDE, run **Developer: Reload Window**. A direct local plugin may not appear
+under **Customize → Plugins**. Confirm `loadUserLocalPlugin sol-advisor loaded` in the
+`Cursor Plugins` output/log instead, then confirm the `sol-advisor` MCP server exposes
+eight tools. If the MCP log reports `spawn bun ENOENT`, fully quit Cursor and use the
+macOS terminal-launch command in [Cursor installation from a local clone](#cursor-installation-from-a-local-clone)
+so Cursor inherits Bun's directory on `PATH`. An unresolved `${PLUGIN_ROOT}` or
+`${PLUGIN_DATA}`, or a non-private plugin-data directory, must produce a visible failure
+rather than a silent fallback.
 
 ### 2. Create an isolated workspace
 
@@ -324,7 +351,7 @@ git -C "$smoke_dir" init
 printf 'Open this folder in Cursor: %s\n' "$smoke_dir"
 ~~~
 
-Open the printed folder in Cursor. Keep `smoke_dir`, `plugin_src`, and `plugin_link` in
+Open the printed folder in Cursor. Keep `smoke_dir`, `plugin_src`, and `plugin_dir` in
 that terminal for the later checks and cleanup.
 
 ### 3. Run setup in the parent chat
@@ -408,13 +435,13 @@ managed files first and do not remove anything until I repeat the exact uninstal
 ~~~
 
 Repeat the exact token, then verify the three managed files are gone. Finally remove
-only the local-plugin symlink created above and the guarded disposable workspace:
+only the unchanged local-plugin copy created above and the guarded disposable workspace:
 
 ~~~sh
-if test -L "$plugin_link" && test "$(readlink "$plugin_link")" = "$plugin_src"; then
-  rm "$plugin_link"
+if test -d "$plugin_dir" && ! test -L "$plugin_dir" && diff -qr "$plugin_src" "$plugin_dir" >/dev/null; then
+  rm -rf -- "$plugin_dir"
 else
-  echo "Refusing to remove unexpected plugin path: $plugin_link" >&2
+  echo "Refusing to remove changed or unexpected plugin path: $plugin_dir" >&2
   exit 1
 fi
 case "$smoke_dir" in
