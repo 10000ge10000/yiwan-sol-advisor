@@ -79,77 +79,72 @@ codex plugin add sol-advisor@sol-advisor
 
 ### Cursor installation from a local clone
 
-Cursor officially supports loading Agent Plugins from `~/.cursor/plugins/local`.
-Until Sol Advisor has a reviewed Marketplace listing, copy the Agent Plugin root into
-that directory. Cursor 3.15.6 rejects a symlink whose resolved target is outside the
-local-plugin directory even though Cursor's documentation currently recommends
-symlinks, so do not use a repository symlink for this test.
+Cursor officially supports loading Agent Plugins from `~/.cursor/plugins/local`, but
+live testing found two Cursor 3.15.6 incompatibilities with the Agent Plugins v1 MCP
+runtime contract:
+
+- it rejects a symlink whose resolved target is outside the local-plugin directory;
+- its plugin MCP process cannot resolve the portable bare `bun` command, even when
+  Cursor is launched with Bun on `PATH`.
+
+Until Cursor fixes those host issues, macOS users can use Sol Advisor's guarded local
+compatibility installer. It keeps the canonical package unchanged, makes a physical plugin copy,
+disables the failing MCP entry only in that copy, and adds an equivalent native MCP
+entry to the selected project's `.cursor/mcp.json` using absolute, locally discovered
+paths. Project scope is required; the installer never edits `~/.cursor/mcp.json`.
 
 ~~~sh
 git switch agent-plugin-conformance
 bun install --frozen-lockfile
 bun run ci
 
-repo_root="$(git rev-parse --show-toplevel)"
-plugin_src="$repo_root/plugins/sol-advisor"
-plugin_dir="$HOME/.cursor/plugins/local/sol-advisor"
-mkdir -p "$(dirname "$plugin_dir")"
-if test -e "$plugin_dir" || test -L "$plugin_dir"; then
-  echo "Refusing to replace existing Cursor local plugin: $plugin_dir" >&2
-  exit 1
-fi
-cp -R "$plugin_src" "$plugin_dir"
-test -f "$plugin_dir/plugin.json"
-test -f "$plugin_dir/mcp.json"
-printf 'Copied Sol Advisor into Cursor local plugins: %s\n' "$plugin_dir"
+# Choose the existing project that should receive the local MCP overlay.
+workspace="$(pwd -P)"
+bun tools/cursor-local.ts install --workspace "$workspace"
 ~~~
+
+The macOS-only installer refuses unmanaged conflicts, symlinks in managed
+Cursor/plugin-data paths, non-private plugin data, and changed managed state. An exact
+same-workspace managed install is recoverable and idempotent. It preserves other servers
+already present in `.cursor/mcp.json`, refuses concurrent edits, and records an exact
+receipt for guarded cleanup.
 
 In Cursor:
 
-1. Run **Developer: Reload Window** from Cursor's IDE command palette.
-2. Do not require a card under **Customize → Plugins**: Cursor 3.15.6 can load a
-   direct local plugin without listing it on that tab. If needed, confirm the load in
-   Cursor's `Cursor Plugins` output/log: `loadUserLocalPlugin sol-advisor loaded`.
-3. Confirm the `sol-advisor` MCP server connects and exposes eight tools. If its log
-   reports `spawn bun ENOENT`, Cursor was launched without the directory containing
-   Bun on its process `PATH`. Fully quit Cursor, then relaunch its executable from the
-   same terminal where `command -v bun` succeeds:
+1. Open `workspace` and run **Developer: Reload Window**.
+2. Select that workspace under **Customize → MCPs**.
+3. Open `sol-advisor` and enable its workspace source. Cursor keeps new project MCP
+   sources disabled until the user explicitly enables them.
+4. Confirm the local environment is **Connected** and all eight tools are enabled.
+5. If needed, verify `loadUserLocalPlugin sol-advisor loaded` in the `Cursor Plugins`
+   output/log. Do not require a card under the user-level Plugins filter.
+6. Start a new Agent chat and ask:
+   `Run the Sol Advisor setup skill in this parent chat. Use Cursor project scope, ask
+   one question at a time, and stop after showing the complete adapter preview.`
 
-   ~~~sh
-   bun_bin="$(command -v bun)"
-   cursor_app="$(mdfind 'kMDItemCFBundleIdentifier == "com.todesktop.230313mzl4w4u92"' | head -n 1)"
-   cursor_bin="${cursor_app%/}/Contents/MacOS/Cursor"
-   test -x "$bun_bin"
-   test -x "$cursor_bin"
-   PATH="$(dirname "$bun_bin"):$PATH" "$cursor_bin" "$repo_root" >/tmp/cursor-sol-advisor.log 2>&1 &
-   ~~~
+Copy exact model IDs from Cursor's model picker. Inspect all three generated files,
+then repeat the exact `INSTALL <nonce>` token—not a generic “yes.” After installation,
+reload Cursor. The native roles should be invocable as `/sol-advisor-routine`,
+`/sol-advisor-high`, and `/sol-advisor-advisor`.
 
-   This launch command is for macOS. Preserve any other `${PLUGIN_DATA}` or MCP error
-   as smoke-test evidence; do not substitute another runtime or loosen permissions.
-4. Open the project you want to use for the test and start a new Agent chat.
-5. Ask: `Run the Sol Advisor setup skill in this parent chat. Use Cursor project scope,
-   ask one question at a time, and stop after showing the complete adapter preview.`
-6. Copy exact model IDs from Cursor's model picker. Inspect all three generated files,
-   then repeat the exact `INSTALL <nonce>` token—not a generic “yes.”
-7. Reload Cursor again. The native roles should be invocable as
-   `/sol-advisor-routine`, `/sol-advisor-high`, and `/sol-advisor-advisor`.
-
-Before removing the local plugin, use the setup skill to uninstall its generated
-adapter files with the exact uninstall token. Then remove only an unchanged copy of
-this plugin:
+Before cleanup, use the setup skill to uninstall its generated adapter files and reset
+the active test profile with the required exact tokens. Then run:
 
 ~~~sh
-if test -d "$plugin_dir" && ! test -L "$plugin_dir" && diff -qr "$plugin_src" "$plugin_dir" >/dev/null; then
-  rm -rf -- "$plugin_dir"
-else
-  echo "Refusing to remove changed or unexpected plugin path: $plugin_dir" >&2
-  exit 1
-fi
+bun tools/cursor-local.ts uninstall --workspace "$workspace"
 ~~~
 
+Uninstall removes only an unchanged managed plugin copy and the exact project MCP entry
+it installed. It preserves `<workspace>/.cursor/sol-advisor-dev-data` by design so a
+local test cannot silently destroy preferences. `reset_configuration` applies only to
+that workspace-local development data root; invoke it only after inspecting its preview
+and exact token.
+
 For the complete disposable-workspace procedure and evidence checklist, follow
-[Developer smoke test: Cursor](#developer-smoke-test-cursor). The local loading method
-is documented by [Cursor's plugin guide](https://cursor.com/docs/plugins#test-plugins-locally).
+[Developer smoke test: Cursor](#developer-smoke-test-cursor). Cursor's documented base
+flow is [Test plugins locally](https://cursor.com/docs/plugins#test-plugins-locally),
+but the compatibility overlay above is required for the tested Cursor 3.15.6 build.
+
 
 For other clients, use only that client's documented Agent Plugins v1 UI or local
 package mechanism; Sol Advisor does not claim a universal install command.
@@ -307,7 +302,7 @@ and uses project scope plus a disposable workspace so it does not touch global a
 files. Record the Cursor version, chosen model IDs, observed subagent details, and any
 fallback or permission message.
 
-### 1. Validate and load the local plugin
+### 1. Create an isolated workspace and install the compatibility bridge
 
 From this repository:
 
@@ -316,45 +311,37 @@ git switch agent-plugin-conformance
 bun install --frozen-lockfile
 bun run ci
 
-repo_root="$(git rev-parse --show-toplevel)"
-plugin_src="$repo_root/plugins/sol-advisor"
-plugin_dir="$HOME/.cursor/plugins/local/sol-advisor"
-mkdir -p "$(dirname "$plugin_dir")"
-if test -e "$plugin_dir" || test -L "$plugin_dir"; then
-  echo "Refusing to replace existing Cursor local plugin: $plugin_dir" >&2
-  exit 1
-fi
-cp -R "$plugin_src" "$plugin_dir"
-test -f "$plugin_dir/plugin.json"
-test -f "$plugin_dir/mcp.json"
-printf 'Copied plugin root into: %s\n' "$plugin_dir"
-~~~
-
-Use a real directory copy for this test. Cursor 3.15.6 rejects external symlink targets
-under `~/.cursor/plugins/local`, despite the current symlink example in Cursor's docs.
-
-In Cursor's IDE, run **Developer: Reload Window**. A direct local plugin may not appear
-under **Customize → Plugins**. Confirm `loadUserLocalPlugin sol-advisor loaded` in the
-`Cursor Plugins` output/log instead, then confirm the `sol-advisor` MCP server exposes
-eight tools. If the MCP log reports `spawn bun ENOENT`, fully quit Cursor and use the
-macOS terminal-launch command in [Cursor installation from a local clone](#cursor-installation-from-a-local-clone)
-so Cursor inherits Bun's directory on `PATH`. An unresolved `${PLUGIN_ROOT}` or
-`${PLUGIN_DATA}`, or a non-private plugin-data directory, must produce a visible failure
-rather than a silent fallback.
-
-### 2. Create an isolated workspace
-
-~~~sh
 tmp_base="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
 smoke_dir="$(mktemp -d "$tmp_base/sol-advisor-cursor-smoke.XXXXXX")"
 git -C "$smoke_dir" init
+bun tools/cursor-local.ts install --workspace "$smoke_dir"
 printf 'Open this folder in Cursor: %s\n' "$smoke_dir"
 ~~~
 
-Open the printed folder in Cursor. Keep `smoke_dir`, `plugin_src`, and `plugin_dir` in
-that terminal for the later checks and cleanup.
+This creates a physical plugin copy and a project-native MCP bridge. Cursor 3.15.6
+rejects external local-plugin symlinks and cannot resolve the canonical plugin MCP's
+bare `bun` executable. The bridge suppresses only the copied plugin's failing MCP entry;
+the repository's canonical `mcp.json` remains unchanged for conformant clients.
 
-### 3. Run setup in the parent chat
+Open the printed folder in Cursor and run **Developer: Reload Window**. Then:
+
+1. Open **Customize → MCPs** and select the `sol-advisor-cursor-smoke…` workspace.
+2. Open `sol-advisor` and explicitly enable its workspace source.
+3. Confirm **Local — Connected** and these eight enabled tools:
+   `get_setup_status`, `get_preferences`, `save_preferences`,
+   `render_client_adapter`, `install_client_adapter`, `uninstall_client_adapter`,
+   `validate_configuration`, and `reset_configuration`.
+4. Confirm `loadUserLocalPlugin sol-advisor loaded` in the `Cursor Plugins` output/log.
+
+Workspace MCP sources are disabled by default; enabling this source is an intentional
+user security boundary. The connected identifier should be project-scoped (for example,
+`project-0-sol-advisor-cursor-smoke-sol-advisor`), not the failing
+`plugin-sol-advisor-sol-advisor` identifier. Record any different behavior as a host
+failure rather than silently substituting another server.
+
+Keep `smoke_dir` in that terminal for the later checks and cleanup.
+
+### 2. Run setup in the parent chat
 
 Open a new Cursor Agent chat and say:
 
@@ -397,7 +384,7 @@ test "$(find "$smoke_dir/.cursor/agents" -maxdepth 1 -type f | wc -l | tr -d ' '
 find "$smoke_dir/.cursor/agents" -maxdepth 1 -type f -print -exec grep -H 'sol-advisor-managed:v1' {} \;
 ~~~
 
-### 4. Verify discovery, routing, and review
+### 3. Verify discovery, routing, and review
 
 Run **Developer: Reload Window** again and start a new Agent chat. Cursor custom
 subagents support explicit `/name` invocation. Perform these checks:
@@ -425,32 +412,35 @@ Cursor documents that it may substitute a compatible model when a pin is restric
 or unavailable. Treat any such substitution as an observed host limitation, not as a
 successful exact-model routing claim.
 
-### 5. Uninstall and clean up
+### 4. Uninstall and clean up
 
 In the parent chat, say:
 
 ~~~text
 Use the Sol Advisor setup skill to uninstall this active project adapter. Preview the
 managed files first and do not remove anything until I repeat the exact uninstall token.
+After uninstall succeeds, preview reset_configuration for this disposable workspace's
+isolated development data root and require its exact reset token before clearing it.
 ~~~
 
-Repeat the exact token, then verify the three managed files are gone. Finally remove
-only the unchanged local-plugin copy created above and the guarded disposable workspace:
+Repeat each exact token, then verify the three managed agent files are gone. Remove the
+unchanged compatibility bridge and guarded disposable workspace:
 
 ~~~sh
-if test -d "$plugin_dir" && ! test -L "$plugin_dir" && diff -qr "$plugin_src" "$plugin_dir" >/dev/null; then
-  rm -rf -- "$plugin_dir"
-else
-  echo "Refusing to remove changed or unexpected plugin path: $plugin_dir" >&2
-  exit 1
-fi
+bun tools/cursor-local.ts uninstall --workspace "$smoke_dir"
 case "$smoke_dir" in
   "$tmp_base"/sol-advisor-cursor-smoke.*) rm -rf -- "$smoke_dir" ;;
   *) echo "Refusing to remove unexpected workspace: $smoke_dir" >&2; exit 1 ;;
 esac
 ~~~
 
-A passing smoke test requires successful plugin/MCP discovery, lazy parent-chat setup,
+The compatibility uninstaller deliberately preserves the isolated
+`<workspace>/.cursor/sol-advisor-dev-data` directory. In this disposable smoke workspace,
+`reset_configuration` affects only that local data root; the guarded workspace removal
+then deletes it without touching another project's preferences.
+
+A passing smoke test requires successful plugin discovery plus the documented project-MCP
+compatibility bridge, lazy parent-chat setup,
 non-mutating preview, exact-token installation, all three native subagents, observable
 routine/high/advisor routing, unchanged-file advisor review, validated configuration, and
 exact managed-file uninstall. Add this evidence to the draft PR before making it ready
@@ -458,7 +448,7 @@ for review:
 
 ~~~text
 Cursor version:
-Plugin + MCP discovered (8 tools): pass/fail
+Plugin loaded + project MCP bridge connected (8 tools): pass/fail
 Setup stayed in parent chat: pass/fail
 Configured routine/high/advisor model values:
 Preview paths/content inspected: pass/fail

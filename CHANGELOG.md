@@ -8,10 +8,12 @@ All notable changes to Sol Advisor are documented here. This project follows
 ### Added
 
 - Cursor local-clone installation guide plus developer smoke-test procedure with guarded setup, evidence, and cleanup steps.
+- Guarded macOS TypeScript installer for Cursor's project-scoped local MCP compatibility bridge, including workspace-isolated data, receipt validation, concurrent-edit refusal, crash recovery, and lifecycle tests.
 
 ### Fixed
 
-- Cursor 3.15.6 local installation now uses a verified directory copy instead of an externally resolved symlink and documents GUI-process Bun `PATH` recovery.
+- Cursor 3.15.6 local installation now uses a verified directory copy instead of an externally resolved symlink.
+- Replaced the ineffective GUI `PATH` relaunch workaround with a project-native MCP bridge after live testing showed Cursor's plugin MCP process cannot resolve the canonical bare `bun` command.
 
 ## [0.5.0] - 2026-08-07
 

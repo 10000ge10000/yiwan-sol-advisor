@@ -9,7 +9,8 @@
     "release:check": "bun tools/validate.ts release-check",
     "ci": "sh plugins/sol-advisor/scripts/verify.sh && bun run test && bun run validate && bun run release:check",
     "tag:check": "bun tools/validate.ts tag-check",
-    "test": "bun test plugins/sol-advisor/mcp/server.test.ts"
+    "cursor:local": "bun tools/cursor-local.ts",
+    "test": "bun test plugins/sol-advisor/mcp/server.test.ts tools/cursor-local.test.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.5"
