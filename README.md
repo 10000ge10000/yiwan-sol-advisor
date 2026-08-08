@@ -53,6 +53,10 @@ guesses, normalizes, silently falls back, or claims a model exists in another cl
 The optional Codex app-task lane remains a distinct explicit opt-in for
 `gpt-5.6-luna` / Max; it is never a fallback or a native role.
 
+## Go deeper
+
+I write [**Attention Heads**](https://attentionheads.substack.com/?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor) — deep, evidence-backed writing on AI, cognition, and agentic engineering. The **Agentic Engineering Field Notes** series is where I publish practical advice on the craft of using AI. [Subscribe](https://attentionheads.substack.com/subscribe?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor) to get new posts to your inbox.
+
 ## Client installation and adapter paths
 
 ### Codex installation from GitHub
@@ -492,10 +496,6 @@ git diff --check
 manifests/skills/runtime, and starts the extracted MCP server with isolated HOME and
 PLUGIN_DATA. Tagged releases remain CI-gated; this repository does not overwrite an
 existing release.
-
-## Go deeper
-
-I write [**Attention Heads**](https://attentionheads.substack.com/?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor) — deep, evidence-backed writing on AI, cognition, and agentic engineering. The **Agentic Engineering Field Notes** series is where I publish practical advice on the craft of using AI. [Subscribe](https://attentionheads.substack.com/subscribe?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor) to get new posts to your inbox.
 
 ## License
 
