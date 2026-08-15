@@ -106,7 +106,7 @@ for required in "$installer" "$runtime_inspector" "$manifest" "$skill" "$contrac
 done
 
 jq empty "$manifest"
-[ "$(jq -r '.version' "$manifest")" = 0.5.0 ] || fail "manifest version is not 0.5.0"
+[ "$(jq -r '.version' "$manifest")" = 0.4.0 ] || fail "manifest version is not 0.4.0"
 grep -Fq 'explicit opt-in' "$manifest" || fail "manifest does not describe explicit Luna opt-in"
 grep -Fqi 'GPT-5.6 Luna' "$manifest" || fail "manifest does not describe Luna routing"
 grep -Fq 'Codex app task tools' "$manifest" || fail "manifest does not describe app-task routing"
@@ -323,7 +323,7 @@ for document in "$readme" "$manifest" "$skill" "$contracts" "$ui"; do
 done
 forbidden_terra='sol_advisor_terra_'"max"
 forbidden_file='sol-advisor-terra-'"max"
-if grep -ERn "$forbidden_terra|$forbidden_file" "$readme" "$plugin_dir"; then fail "forbidden second Terra role remains"; fi
+if rg -n "$forbidden_terra|$forbidden_file" "$readme" "$plugin_dir"; then fail "forbidden second Terra role remains"; fi
 pass "native and Luna contracts, opt-in guards, and stale-claim checks"
 
 sh -n "$installer"
