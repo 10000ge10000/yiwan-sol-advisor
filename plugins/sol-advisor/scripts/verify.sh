@@ -1,5 +1,5 @@
 #!/bin/sh
-# Repository-local verification for Sol Advisor's two-role companion migration.
+# Repository-local verification for Sol Advisor's native three-role architecture.
 
 set -eu
 
@@ -15,11 +15,13 @@ templates=$plugin_dir/agents
 manifest=$plugin_dir/.codex-plugin/plugin.json
 skill=$plugin_dir/skills/orchestration/SKILL.md
 contracts=$plugin_dir/skills/orchestration/references/role-contracts.md
-luna_contract=$plugin_dir/skills/orchestration/references/luna-task-lane.md
 readme=$repo_dir/README.md
 ui=$plugin_dir/skills/orchestration/agents/openai.yaml
+retired_contract=$plugin_dir/skills/orchestration/references/luna-task-lane.md
 
-tmp_base=${TMPDIR:-/tmp}
+tmp_base=/tmp
+tmp_env=$(printenv TMPDIR 2>/dev/null || true)
+if [ -n "$tmp_env" ]; then tmp_base=$tmp_env; fi
 case "$tmp_base" in /*) ;; *) tmp_base=/tmp ;; esac
 tmp_dir=''
 cleanup() {
@@ -33,11 +35,11 @@ cleanup() {
 trap cleanup 0 HUP INT TERM
 tmp_dir=$(mktemp -d "$tmp_base/sol-advisor-verify.XXXXXX") || fail "could not create disposable verification directory"
 
+luna_file=sol-advisor-luna-implementer.toml
 terra_file=sol-advisor-terra-implementer.toml
 sol_file=sol-advisor-sol-reviewer.toml
-luna_file=sol-advisor-luna-implementer.toml
-legacy_terra_sha256=4425a8c1f21ce8c6af93f96adc253bbc33ea301f1389b3fa8ce350be08584eca
 legacy_luna_sha256=fba1b42849d93737e83b094a2ab0b1611f87ac37db7438c8bbdf581f0813f8eb
+legacy_terra_sha256=4425a8c1f21ce8c6af93f96adc253bbc33ea301f1389b3fa8ce350be08584eca
 
 snapshot_files() {
   target=$1
@@ -59,6 +61,24 @@ snapshot_files() {
 write_legacy_roles() {
   target=$1
   mkdir -p "$target"
+  cat > "$target/$luna_file" <<'LEGACY_LUNA'
+name = "sol_advisor_luna_implementer"
+description = "Sol Advisor's routine implementation lane for bounded, fully specified work."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "max"
+
+developer_instructions = """
+You are Sol Advisor's routine implementation worker. Execute the supplied five-part
+implementation specification exactly when it is bounded and largely determined by
+the contract. Preserve stated interfaces and constraints, make only the files you
+own, and adapt to concurrent edits instead of reverting work you do not own.
+
+Surface material ambiguity, missing acceptance criteria, scope conflicts, or failed
+verification rather than redesigning the architecture. Run the requested checks and
+report actual evidence. Do not silently substitute a different role, model, or
+reasoning level; this installed custom-agent profile is the required routine lane.
+"""
+LEGACY_LUNA
   cat > "$target/$terra_file" <<'LEGACY_TERRA'
 name = "sol_advisor_terra_implementer"
 description = "Sol Advisor's complex implementation lane for context-heavy or higher-risk work."
@@ -78,47 +98,36 @@ actual evidence. Do not silently substitute a different role, model, or reasonin
 level; this installed custom-agent profile is the required complex lane.
 """
 LEGACY_TERRA
-  cat > "$target/$luna_file" <<'LEGACY_LUNA'
-name = "sol_advisor_luna_implementer"
-description = "Sol Advisor's routine implementation lane for bounded, fully specified work."
-model = "gpt-5.6-luna"
-model_reasoning_effort = "max"
-
-developer_instructions = """
-You are Sol Advisor's routine implementation worker. Execute the supplied five-part
-implementation specification exactly when it is bounded and largely determined by
-the contract. Preserve stated interfaces and constraints, make only the files you
-own, and adapt to concurrent edits instead of reverting work you do not own.
-
-Surface material ambiguity, missing acceptance criteria, scope conflicts, or failed
-verification rather than redesigning the architecture. Run the requested checks and
-report actual evidence. Do not silently substitute a different role, model, or
-reasoning level; this installed custom-agent profile is the required routine lane.
-"""
-LEGACY_LUNA
   cp "$templates/$sol_file" "$target/$sol_file"
-  [ "$(shasum -a 256 "$target/$terra_file" | awk '{print $1}')" = "$legacy_terra_sha256" ] || fail "legacy Terra fixture digest drifted"
   [ "$(shasum -a 256 "$target/$luna_file" | awk '{print $1}')" = "$legacy_luna_sha256" ] || fail "legacy Luna fixture digest drifted"
+  [ "$(shasum -a 256 "$target/$terra_file" | awk '{print $1}')" = "$legacy_terra_sha256" ] || fail "legacy Terra fixture digest drifted"
 }
 
-for required in "$installer" "$runtime_inspector" "$manifest" "$skill" "$contracts" "$luna_contract" "$readme" "$ui"; do
+for required in "$installer" "$runtime_inspector" "$manifest" "$skill" "$contracts" "$readme" "$ui"; do
   test -f "$required" || fail "required file missing: $required"
 done
+test ! -e "$retired_contract" || fail "retired separate workflow contract remains: $retired_contract"
+pass "required files present and retired contract absent"
 
 jq empty "$manifest"
-[ "$(jq -r '.version' "$manifest")" = 0.4.0 ] || fail "manifest version is not 0.4.0"
-grep -Fq 'explicit opt-in' "$manifest" || fail "manifest does not describe explicit Luna opt-in"
-grep -Fqi 'GPT-5.6 Luna' "$manifest" || fail "manifest does not describe Luna routing"
-grep -Fq 'Codex app task tools' "$manifest" || fail "manifest does not describe app-task routing"
-grep -Fq 'fresh Sol' "$manifest" || fail "manifest does not preserve native fresh Sol review"
-pass "manifest JSON, version, and both-mode UI language"
+[ "$(jq -r '.version' "$manifest")" = 0.5.0 ] || fail "manifest version is not 0.5.0"
+grep -Fq 'default native Luna / Max' "$manifest" || fail "manifest omits default Luna routing"
+grep -Fq 'GPT-5.6 Terra / High' "$manifest" || fail "manifest omits Terra escalation"
+grep -Fq 'fresh GPT-5.6 Sol / High' "$manifest" || fail "manifest omits fresh Sol review"
+pass "manifest JSON, release version, and routing language"
 
 python3 - "$templates" <<'PY'
 from pathlib import Path
-import sys, tomllib
+import sys
+import tomllib
 
 root = Path(sys.argv[1])
 expected = {
+    "sol-advisor-luna-implementer.toml": {
+        "name": "sol_advisor_luna_implementer",
+        "model": "gpt-5.6-luna",
+        "model_reasoning_effort": "max",
+    },
     "sol-advisor-terra-implementer.toml": {
         "name": "sol_advisor_terra_implementer",
         "model": "gpt-5.6-terra",
@@ -142,19 +151,19 @@ for filename, pins in expected.items():
     for field, value in pins.items():
         if data.get(field) != value:
             raise SystemExit(f"{filename}: {field}={data.get(field)!r}, expected {value!r}")
-print("two exact role pins are valid")
+print("three exact role pins are valid")
 PY
-pass "exact two-role TOML inventory"
+pass "exact three-role TOML inventory"
 
-grep -Fq "legacy_terra_sha256=$legacy_terra_sha256" "$installer" || fail "installer legacy Terra digest mismatch"
 grep -Fq "legacy_luna_sha256=$legacy_luna_sha256" "$installer" || fail "installer legacy Luna digest mismatch"
-pass "immutable v0.2.0 migration fingerprints"
+grep -Fq "legacy_terra_sha256=$legacy_terra_sha256" "$installer" || fail "installer legacy Terra digest mismatch"
+pass "immutable historical migration fingerprints"
 
 clean_target=$tmp_dir/clean
 sh "$installer" --target-dir "$clean_target"
-cmp -s "$templates/$terra_file" "$clean_target/$terra_file" || fail "clean Terra install mismatch"
-cmp -s "$templates/$sol_file" "$clean_target/$sol_file" || fail "clean Sol install mismatch"
-test ! -e "$clean_target/$luna_file" || fail "clean install created retired Luna role"
+for role in "$luna_file" "$terra_file" "$sol_file"; do
+  cmp -s "$templates/$role" "$clean_target/$role" || fail "clean install mismatch: $role"
+done
 sh "$installer" --target-dir "$clean_target" --check
 before=$(snapshot_files "$clean_target")
 sh "$installer" --target-dir "$clean_target"
@@ -169,29 +178,30 @@ pass "missing-target check refusal is non-mutating"
 
 codex_home=$tmp_dir/codex-home
 CODEX_HOME="$codex_home" sh "$installer"
-cmp -s "$templates/$terra_file" "$codex_home/agents/$terra_file" || fail "CODEX_HOME Terra mismatch"
-cmp -s "$templates/$sol_file" "$codex_home/agents/$sol_file" || fail "CODEX_HOME Sol mismatch"
+for role in "$luna_file" "$terra_file" "$sol_file"; do
+  cmp -s "$templates/$role" "$codex_home/agents/$role" || fail "CODEX_HOME install mismatch: $role"
+done
 test ! -e "$codex_home/config.toml" || fail "installer created config.toml"
 relative_parent=$tmp_dir/relative-parent
 mkdir "$relative_parent"
 (cd "$relative_parent" && sh "$installer" --target-dir relative-agents)
-cmp -s "$templates/$terra_file" "$relative_parent/relative-agents/$terra_file" || fail "relative target Terra mismatch"
+cmp -s "$templates/$luna_file" "$relative_parent/relative-agents/$luna_file" || fail "relative target Luna mismatch"
 pass "CODEX_HOME and relative target behavior"
 
 migration_target=$tmp_dir/migration
 write_legacy_roles "$migration_target"
 sh "$installer" --target-dir "$migration_target"
-cmp -s "$templates/$terra_file" "$migration_target/$terra_file" || fail "legacy Terra was not migrated"
-cmp -s "$templates/$sol_file" "$migration_target/$sol_file" || fail "Sol changed during migration"
-test ! -e "$migration_target/$luna_file" || fail "exact legacy Luna was not removed"
+for role in "$luna_file" "$terra_file" "$sol_file"; do
+  cmp -s "$templates/$role" "$migration_target/$role" || fail "historical migration mismatch: $role"
+done
 sh "$installer" --target-dir "$migration_target" --check
-pass "exact v0.2.0 Terra replacement and Luna retirement"
+pass "exact historical Luna/Terra migration"
 
 modified_luna=$tmp_dir/modified-luna
 write_legacy_roles "$modified_luna"
 printf '%s\n' modified >> "$modified_luna/$luna_file"
 before=$(snapshot_files "$modified_luna")
-if sh "$installer" --target-dir "$modified_luna"; then fail "installer removed modified Luna"; fi
+if sh "$installer" --target-dir "$modified_luna"; then fail "installer replaced modified Luna"; fi
 after=$(snapshot_files "$modified_luna")
 [ "$before" = "$after" ] || fail "modified-Luna refusal partially mutated target"
 pass "modified Luna refusal with zero partial mutation"
@@ -203,132 +213,124 @@ before=$(snapshot_files "$modified_terra")
 if sh "$installer" --target-dir "$modified_terra"; then fail "installer replaced modified Terra"; fi
 after=$(snapshot_files "$modified_terra")
 [ "$before" = "$after" ] || fail "modified-Terra refusal partially mutated target"
-pass "modified Terra refusal with zero partial mutation"
+pass "differing legacy Terra refusal with zero partial mutation"
 
-stale_luna=$tmp_dir/stale-luna
-sh "$installer" --target-dir "$stale_luna"
-stale_fixture=$tmp_dir/stale-fixture
-write_legacy_roles "$stale_fixture"
-cp "$stale_fixture/$luna_file" "$stale_luna/$luna_file"
-before=$(snapshot_files "$stale_luna")
-if sh "$installer" --target-dir "$stale_luna" --check; then fail "--check accepted stale Luna"; fi
-after=$(snapshot_files "$stale_luna")
-[ "$before" = "$after" ] || fail "stale-Luna check mutated target"
-pass "stale Luna check refusal is non-mutating"
+modified_current=$tmp_dir/modified-current
+sh "$installer" --target-dir "$modified_current"
+printf '%s\n' modified >> "$modified_current/$luna_file"
+before=$(snapshot_files "$modified_current")
+if sh "$installer" --target-dir "$modified_current"; then fail "installer replaced modified current Luna"; fi
+after=$(snapshot_files "$modified_current")
+[ "$before" = "$after" ] || fail "modified current Luna refusal partially mutated target"
+pass "modified current-role refusal with zero partial mutation"
 
 unsafe=$tmp_dir/unsafe
 mkdir "$unsafe"
-ln -s "$templates/$terra_file" "$unsafe/$terra_file"
+ln -s "$templates/$luna_file" "$unsafe/$luna_file"
 before=$(snapshot_files "$unsafe")
-if sh "$installer" --target-dir "$unsafe"; then fail "installer accepted symlinked Terra"; fi
+if sh "$installer" --target-dir "$unsafe"; then fail "installer accepted symlinked Luna"; fi
 after=$(snapshot_files "$unsafe")
 [ "$before" = "$after" ] || fail "symlink refusal partially mutated target"
+test ! -e "$unsafe/$terra_file" || fail "symlink refusal partially installed Terra"
 test ! -e "$unsafe/$sol_file" || fail "symlink refusal partially installed Sol"
 pass "unsafe destination refusal with zero partial mutation"
 
 runtime_sessions=$tmp_dir/runtime-sessions
-runtime_day=$runtime_sessions/2026/08/02
+runtime_day=$runtime_sessions/2026/08/15
 mkdir -p "$runtime_day"
 runtime_id=11111111-1111-7111-8111-111111111111
-runtime_rollout=$runtime_day/rollout-2026-08-02T00-00-00-$runtime_id.jsonl
+runtime_rollout=$runtime_day/rollout-2026-08-15T00-00-00-$runtime_id.jsonl
 printf '%s\n' \
   '{"type":"response_item","payload":{"prompt":"DO_NOT_LEAK_PROMPT"}}' \
-  "{\"type\":\"session_meta\",\"payload\":{\"id\":\"$runtime_id\",\"parent_thread_id\":\"00000000-0000-7000-8000-000000000000\",\"agent_role\":\"sol_advisor_terra_implementer\",\"agent_path\":\"/root/fixture\",\"model_provider\":\"openai\",\"cwd\":\"/fixture\"}}" \
-  '{"type":"turn_context","payload":{"model":"gpt-5.6-terra","effort":"high","sandbox_policy":{"type":"danger-full-access"},"permission_profile":{"type":"disabled"},"cwd":"/fixture"}}' \
+  "{\"type\":\"session_meta\",\"payload\":{\"id\":\"$runtime_id\",\"parent_thread_id\":\"00000000-0000-7000-8000-000000000000\",\"agent_role\":\"sol_advisor_luna_implementer\",\"agent_path\":\"/root/fixture\",\"model_provider\":\"openai\",\"cwd\":\"/fixture\"}}" \
+  '{"type":"turn_context","payload":{"model":"gpt-5.6-luna","effort":"max","sandbox_policy":{"type":"danger-full-access"},"permission_profile":{"type":"disabled"},"cwd":"/fixture"}}' \
   > "$runtime_rollout"
 runtime_output=$(sh "$runtime_inspector" --sessions-dir "$runtime_sessions" "$runtime_id")
 printf '%s\n' "$runtime_output" | jq -e --arg id "$runtime_id" '
-  .thread_id == $id and .agent_role == "sol_advisor_terra_implementer"
-  and .model == "gpt-5.6-terra" and .effort == "high"
+  .thread_id == $id and .agent_role == "sol_advisor_luna_implementer"
+  and .model == "gpt-5.6-luna" and .effort == "max"
   and .sandbox_policy_type == "danger-full-access"
   and .permission_profile_type == "disabled"
-' >/dev/null || fail "runtime inspector returned wrong Terra/High evidence"
+' >/dev/null || fail "runtime inspector returned wrong Luna/Max evidence"
 if printf '%s\n' "$runtime_output" | grep -Fq DO_NOT_LEAK; then fail "runtime inspector leaked payload"; fi
 if sh "$runtime_inspector" --sessions-dir "$runtime_sessions" invalid >/dev/null 2>&1; then fail "runtime inspector accepted invalid id"; fi
 zero_id=22222222-2222-7222-8222-222222222222
 if sh "$runtime_inspector" --sessions-dir "$runtime_sessions" "$zero_id" >/dev/null 2>&1; then fail "runtime inspector accepted zero matches"; fi
-pass "runtime inspector Terra/High routing and safe refusal"
+pass "runtime inspector Luna/Max routing and safe refusal"
 
 for document in "$skill" "$contracts"; do
+  grep -Fq 'agent_type: sol_advisor_luna_implementer' "$document" || fail "missing Luna spawn in $document"
   grep -Fq 'agent_type: sol_advisor_terra_implementer' "$document" || fail "missing Terra spawn in $document"
   grep -Fq 'agent_type: sol_advisor_sol_reviewer' "$document" || fail "missing Sol spawn in $document"
   grep -Fq 'fork_turns: none' "$document" || fail "missing fresh context in $document"
-  if grep -Eq 'agent_type:.*(luna|terra_max)' "$document"; then fail "retired implementation spawn remains in $document"; fi
+  if grep -Eq 'agent_type:.*terra_max' "$document"; then fail "retired Terra-Max spawn remains in $document"; fi
   if grep -Eq '^[[:space:]]*(model|reasoning_effort):' "$document"; then fail "per-spawn override remains in $document"; fi
 done
 grep -Fq '../../scripts/install-agents.sh' "$skill" || fail "skill does not resolve installer relatively"
 grep -Fq '../../scripts/inspect-agent-runtime.sh' "$skill" || fail "skill does not resolve inspector relatively"
 grep -Fqi 'public native spawn/details metadata first' "$skill" || fail "skill lacks public-details-first evidence rule"
 grep -Fqi 'parent captures and verifies exact before-and-after' "$contracts" || fail "contracts lack behavioral read-only state check"
-grep -Fq 'luna-task-lane.md' "$skill" || fail "skill does not link the Luna task contract"
-grep -Fq 'luna-task-lane.md' "$contracts" || fail "role contracts do not link the Luna task contract"
+grep -Fqi 'corrected Luna attempt' "$skill" || fail "skill omits Terra misclassification escalation"
+grep -Fqi 'corrected Luna attempt' "$contracts" || fail "contracts omit Terra misclassification escalation"
+pass "native role contracts and routing checks"
 
-for tool in list_projects list_threads create_thread wait_threads read_thread send_message_to_thread; do
-  for document in "$skill" "$contracts" "$luna_contract" "$readme"; do
-    grep -Fq "$tool" "$document" || fail "$document omits Luna app tool: $tool"
-  done
-done
-grep -Fq 'gpt-5.6-luna' "$skill" || fail "skill omits Luna model"
-grep -Fq 'thinking` to `max' "$skill" || fail "skill omits Luna Max routing"
-grep -Fq 'isGitRepository' "$luna_contract" || fail "Luna contract omits Git-project check"
-grep -Fq 'isolated worktree environment' "$luna_contract" || fail "Luna contract omits Git worktree default"
-grep -Fq 'clientThreadId' "$luna_contract" || fail "Luna contract omits setup-pending identity guard"
-grep -Fq 'same ready' "$luna_contract" || fail "Luna contract omits same-task correction rule"
-grep -Fq 'PR AUTHORIZED FOR' "$luna_contract" || fail "Luna contract omits explicit PR authorization"
-grep -Fq 'concurrent edits merge-safe' "$luna_contract" || fail "Luna contract omits merge-safety warning"
-grep -Fq 'OBJECTIVE' "$luna_contract" || fail "Luna packet omits objective"
-grep -Fq 'FILES AND OWNERSHIP' "$luna_contract" || fail "Luna packet omits ownership"
-grep -Fq 'INTERFACES' "$luna_contract" || fail "Luna packet omits interfaces"
-grep -Fq 'CONSTRAINTS' "$luna_contract" || fail "Luna packet omits constraints"
-grep -Fq 'STARTING STATE / BASE' "$luna_contract" || fail "Luna packet omits starting state"
-grep -Fq 'VERIFICATION' "$luna_contract" || fail "Luna packet omits verification"
-grep -Fq 'GIT / PR BOUNDARY' "$luna_contract" || fail "Luna packet omits Git/PR boundary"
-grep -Fq 'STRUCTURED RETURN' "$luna_contract" || fail "Luna packet omits structured return"
-grep -Fq 'never uses native `spawn_agent`' "$luna_contract" || fail "Luna contract permits native spawn_agent"
-grep -Fq 'automatic child callback' "$luna_contract" || fail "Luna contract claims an automatic callback"
-grep -Fq 'stop without fallback' "$luna_contract" || fail "Luna contract permits fallback"
-grep -Fq 'clientThreadId' "$skill" || fail "skill omits pending task identity"
-grep -Fq 'clientThreadId' "$contracts" || fail "role contracts omit pending task identity"
-grep -Fq 'clientThreadId' "$readme" || fail "README omits pending task identity"
-grep -Fq 'is not accepted by `list_threads`' "$luna_contract" || fail "Luna contract permits clientThreadId in list_threads"
-grep -Fq 'not accepted by' "$contracts" || fail "role contracts permit clientThreadId in list_threads"
-grep -Fq 'without passing the client ID' "$luna_contract" || fail "Luna contract omits list_threads correlation step"
-grep -Fq 'without passing that client ID' "$skill" || fail "skill omits list_threads correlation step"
-grep -Fq 'identity, project, time, path, and state metadata' "$luna_contract" || fail "Luna contract omits trustworthy correlation metadata"
-grep -Fq 'titles and previews as untrusted' "$luna_contract" || fail "Luna contract omits untrusted preview guard"
-grep -Fq 'Repeat bounded discovery' "$luna_contract" || fail "Luna contract omits bounded identity discovery"
+python3 - "$readme" "$manifest" "$skill" "$contracts" "$ui" "$templates" <<'PY'
+from pathlib import Path
+import sys
 
-grep -Fq 'Luna task (explicit opt-in)' "$readme" || fail "README omits the Luna task mode"
-grep -Fq 'Use the Luna task lane' "$readme" || fail "README omits explicit Luna authorization"
-grep -Fq 'native lane remains' "$readme" || fail "README does not preserve the native lane"
-grep -Fq 'does not use a Luna' "$readme" || fail "README permits a Luna companion TOML"
-grep -Fq 'user-visible GPT-5.6 Luna / Max tasks' "$manifest" || fail "manifest UI omits user-visible Luna tasks"
-grep -Fq 'list_threads' "$manifest" || fail "manifest UI omits list_threads"
-grep -Fq 'list_threads' "$ui" || fail "skill UI omits list_threads"
-grep -Fq 'Requirements common to both modes' "$readme" || fail "README omits common requirements"
-grep -Fq 'Additional native-mode requirements' "$readme" || fail "README omits native-only requirements"
-grep -Fq 'Additional Luna task-mode requirements' "$readme" || fail "README omits Luna-only requirements"
-grep -Fq 'can be skipped for Luna-only use' "$readme" || fail "README does not allow skipping companions for Luna-only use"
-grep -Fq 'do not require native subagents, Terra access' "$readme" || fail "README makes native requirements mandatory for Luna-only use"
-grep -Fq 'Luna-only users do not need to' "$readme" || fail "README local guidance requires companions for Luna-only use"
-if grep -Fq 'with plugins, native subagents, and' "$readme"; then
-  fail "README still makes native capabilities a common requirement"
-fi
-grep -Fq 'explicitly opt into Luna' "$ui" || fail "skill UI omits explicit Luna opt-in"
+roots = [Path(value) for value in sys.argv[1:]]
+terms = [
+    "list_" + "projects",
+    "list_" + "threads",
+    "create_" + "thread",
+    "wait_" + "threads",
+    "read_" + "thread",
+    "send_" + "message_to_thread",
+    "client" + "ThreadId",
+    "app-" + "task",
+    "app " + "task",
+    "Luna " + "task",
+    "task-" + "lane",
+]
+paths = []
+for root in roots:
+    if root.is_file():
+        paths.append(root)
+    elif root.is_dir():
+        paths.extend(path for path in root.rglob("*") if path.is_file())
+for path in paths:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        continue
+    for term in terms:
+        if term in text:
+            raise SystemExit(f"obsolete workflow reference {term!r} remains in {path}")
+print("obsolete workflow references are absent")
+PY
+
+grep -Fq 'Sol / High plans' "$readme" || fail "README omits plain normal path"
+grep -Fq 'Luna / Max' "$readme" || fail "README omits Luna / Max routine path"
+grep -Fq 'Terra /' "$readme" || fail "README omits Terra escalation path"
+grep -Fq 'one corrected Luna attempt' "$readme" || fail "README omits corrected-attempt escalation"
+grep -Fq 'Attention Heads' "$readme" || fail "README lost Attention Heads section"
+grep -Fq 'https://attentionheads.substack.com/?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor' "$readme" || fail "README changed Attention Heads link"
+grep -Fq 'https://attentionheads.substack.com/subscribe?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor' "$readme" || fail "README changed Subscribe link"
+pass "README normal path, escalation, and preserved Go deeper links"
 
 for document in "$readme" "$manifest" "$skill" "$contracts" "$ui"; do
   if grep -Eqi 'Terra / High is the sole implementation producer|one role-pinned .*handles all implementation|route all implementation through.*Terra|delegate all implementation to (the )?(native )?Terra' "$document"; then
     fail "stale single-mode implementation claim remains in $document"
   fi
 done
-forbidden_terra='sol_advisor_terra_'"max"
-forbidden_file='sol-advisor-terra-'"max"
-if rg -n "$forbidden_terra|$forbidden_file" "$readme" "$plugin_dir"; then fail "forbidden second Terra role remains"; fi
-pass "native and Luna contracts, opt-in guards, and stale-claim checks"
+for forbidden in sol_advisor_terra_max sol-advisor-terra-max; do
+  if rg -n "$forbidden" "$readme" "$manifest" "$skill" "$contracts" "$ui" "$templates"; then fail "forbidden second Terra role remains"; fi
+done
+pass "obsolete single-lane claims and second Terra role absent"
 
 sh -n "$installer"
 sh -n "$runtime_inspector"
 sh -n "$script_dir/verify.sh"
 pass "shell syntax"
 
-printf '%s\n' "VERIFY PASSED: Sol Advisor two-role migration checks completed in $tmp_dir"
+printf '%s\n' "VERIFY PASSED: Sol Advisor native three-role checks completed in $tmp_dir"
