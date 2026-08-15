@@ -4,20 +4,27 @@ Use these contracts with Sol Advisor's namespaced, role-pinned native custom age
 They do not launch a nested Codex CLI or change global default-agent routing. Adapt
 every placeholder without removing a required field.
 
+For task-scoped preflight, runtime evidence, sandbox interpretation, and maintainer
+commands, use [operations.md](operations.md).
+
 ## Required preflight
 
-Before every native spawn, complete steps 1-2 of SKILL.md's preflight. After spawning,
-complete steps 3-4 before accepting the result:
+At the start of each task, confirm Sol / High, then choose the starting path. For the
+normal routine path, run the selective Luna+Sol companion check from operations.md;
+preflight Luna and the fresh Sol reviewer once and cache those results for this task.
+For known complexity or high-risk work, run the selective Terra+Sol check instead.
+Do not require Luna exposure or a Luna companion check, and cache Terra plus Sol. If a
+first Luna result reveals complexity or risk, run the selective Terra check and reuse the task-cached Sol result.
+After spawning, complete the selected role's routing and
+reviewer isolation checks before accepting the result; do not repeat successful checks
+before every delegation:
 
-1. Require the non-mutating companion check to prove all three installed files exactly
-   match current templates.
-2. Require native exposure of exactly `sol_advisor_luna_implementer`,
-   `sol_advisor_terra_implementer`, and `sol_advisor_sol_reviewer`.
-3. Observe the selected role, model, and effort through public spawn/details metadata
+1. Require the selected exact native role and fresh-context spawn contract.
+2. Observe the selected role, model, and effort through public spawn/details metadata
    first, using the local runtime inspector only for omitted fields. Accept Luna /
    Max for routine implementation, Terra / High for explicit escalation, and Sol /
    High for review.
-4. For the reviewer, capture actual sandbox policy and permission profile types.
+3. For the reviewer, capture actual sandbox policy and permission profile types.
 
 A missing, stale, unsafe, conflicting, unavailable, inconsistent, or unobservable
 role/model/effort stops the native lane. Never silently fall back. Model and effort
@@ -69,9 +76,11 @@ The primary session must inspect the diff and rerun verification itself.
 
 Use this lane for bounded, fully specified routine work. The installed role pins
 GPT-5.6 Luna at max reasoning. It must surface ambiguity and failed checks rather
-than redesigning the architecture. If one corrected Luna attempt shows that the work
-is judgment-heavy, high-risk, or misclassified as routine, return that signal to the
-primary for Terra / High escalation.
+than redesigning the architecture. A first result that demonstrates judgment-heavy,
+high-risk, wide-blast-radius, or misclassified work may go straight to Terra / High;
+do not force a retry first. If the specification itself was incomplete or wrong,
+return a precise correction for one corrected Luna attempt. That retry is not a
+prerequisite for Terra escalation.
 
 Spawn exactly:
 
@@ -94,8 +103,9 @@ constraint, and surface ambiguity instead of redesigning the architecture.
 ## Terra / High - explicit high-complexity escalation lane
 
 Use this lane for judgment-heavy, high-risk, context-heavy, or wide-blast-radius work
-identified before delegation, and for work that one corrected Luna attempt proves was
-misclassified as routine. The installed role pins GPT-5.6 Terra at high reasoning.
+identified before delegation, and for complexity or risk revealed by a first Luna
+result. The installed role pins GPT-5.6 Terra at high reasoning. A corrected Luna
+attempt is reserved for a specification error and is not a prerequisite for Terra.
 
 Spawn exactly:
 

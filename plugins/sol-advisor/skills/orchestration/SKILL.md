@@ -1,20 +1,19 @@
 ---
 name: orchestration
-description: "Codex-native architect and delegation workflow with default GPT-5.6 Luna / Max routine implementation, explicit GPT-5.6 Terra / High escalation, and a fresh GPT-5.6 Sol / High final review."
+description: "Codex-native architect workflow with default GPT-5.6 Luna / Max routine implementation, explicit GPT-5.6 Terra / High escalation, and a fresh GPT-5.6 Sol / High final review."
 ---
 
 # Sol Advisor Orchestration
 
 Act as the architect. Own the user's intent, architecture, decomposition, complete
-task specification, parent verification, and final acceptance. The normal native
-path is Sol / High planning, Luna / Max routine implementation, parent verification,
-and a fresh Sol / High review. Explicitly escalate judgment-heavy or high-risk work,
-or work that one corrected Luna attempt shows was misclassified as routine, to Terra
-/ High. All three workers are native Codex custom agents; this skill has one native
-workflow and no secondary implementation mechanism.
+worker specification, parent verification, escalation decisions, and final acceptance.
+The normal path is Sol / High planning, Luna / Max routine implementation, parent
+verification, and a fresh Sol / High review. Terra / High is explicit escalation for
+judgment-heavy or high-risk work, including complexity revealed by a first Luna result.
 
 Read [references/role-contracts.md](references/role-contracts.md) before the first
-delegation in a session.
+delegation. Use [references/operations.md](references/operations.md) for exact spawn,
+preflight, runtime-evidence, isolation, and maintainer procedures.
 
 ## Confirm the primary session
 
@@ -24,91 +23,43 @@ to select Sol / High and stop before delegation. If runtime metadata does not ex
 them, ask the user to confirm Sol / High and stop until confirmed. A skill cannot
 change the primary model itself; never assume or claim this prerequisite is satisfied.
 
-## Choose the native implementation lane
+## Preflight once per task and selected path
 
-Luna / Max is the default routine implementation lane. Route bounded, well-specified
-work through the exact native role:
+Preflight is task-scoped and follows the selected starting path, not an unconditional
+Luna+Sol check:
 
-~~~text
-agent_type: sol_advisor_luna_implementer
-fork_turns: none
-~~~
+1. Confirm Sol / High in the primary session.
+2. For the normal routine path, run the selective Luna+Sol companion check from
+   operations.md. Confirm native exposure and public routing metadata for Luna / Max
+   and the fresh Sol reviewer once, then cache both results for this task only.
+3. For known complexity or high-risk work, run the selective Terra+Sol companion
+   check. Do not require Luna exposure or a Luna companion check. Confirm Terra / High
+   and the fresh Sol reviewer once, then cache both results for this task only.
+4. If a first Luna result reveals complexity, risk, or misclassification, run the
+   selective Terra check, confirm Terra / High, and reuse the task-cached Sol result.
+   Never repeat the successful Sol check for that escalation.
+5. Never carry a cached result into a later task, after an install/update, or after a
+   routing/configuration change. Never silently substitute a missing role, model,
+   effort, or reviewer.
 
-The installed role pins GPT-5.6 Luna at max reasoning. Omit per-spawn model and
-reasoning fields. If a corrected Luna attempt reveals that the work is judgment-heavy,
-high-risk, or otherwise misclassified as routine, route the corrected specification
-to the exact escalation role:
+If public metadata omits model or effort, use the operations reference's local inspector
+only for those omitted fields. Public evidence remains authoritative when present;
+conflicting or unobservable evidence stops the affected lane.
 
-~~~text
-agent_type: sol_advisor_terra_implementer
-fork_turns: none
-~~~
+## Route native implementation
 
-The installed role pins GPT-5.6 Terra at high reasoning. Terra is also the explicit
-choice for judgment-heavy, high-risk, context-heavy, or wide-blast-radius work from
-the outset. There is no silent model, effort, role, or native-lane fallback.
+Luna / Max is the default for bounded, fully specified routine work. Spawn the exact
+native Luna role with a fresh context as defined in the role contracts.
 
-## Preflight the native companion custom agents
+A first Luna result may justify immediate Terra / High escalation when it demonstrates
+judgment-heavy, high-risk, wide-blast-radius, or misclassified work. Do not force a
+retry first. If the specification itself was incomplete or wrong, correct the
+specification and send one corrected Luna attempt; that retry is not a prerequisite
+for Terra escalation. If the corrected result still reveals complexity or risk, select
+Terra.
 
-The three role files are user-owned native custom-agent TOML files. Installing or
-updating the plugin does not automatically register them. Install or update them
-separately, then start a fresh Codex task so native discovery sees the current
-profiles.
-
-Before every native delegation, complete steps 1-2. After spawning a native lane,
-complete steps 3-4 before accepting its result:
-
-1. Resolve `../../scripts/install-agents.sh` relative to this SKILL.md and run its
-   non-mutating exactness check:
-
-   ~~~sh
-   skill_dir=<directory-containing-this-SKILL.md>
-   installer="$skill_dir/../../scripts/install-agents.sh"
-   sh "$installer" --check
-   ~~~
-
-   It must exit zero. This proves Luna, Terra, and Sol match the shipped templates
-   exactly. If the check reports a missing, stale, unsafe, or conflicting file, stop
-   the affected lane. Give the user the installer path and reported destination.
-   Never work around failure with another agent, model, or effort.
-
-2. Inspect the native spawn tool's available `agent_type` entries. All exact names
-   must be exposed:
-
-   - `sol_advisor_luna_implementer`
-   - `sol_advisor_terra_implementer`
-   - `sol_advisor_sol_reviewer`
-
-   If a name is missing, tell the user to install/check the companion files, start a
-   fresh task, and update Codex if the name remains unavailable. Do not substitute a
-   built-in or similarly named role.
-
-3. Treat exact templates plus observed runtime routing as an acceptance gate. Inspect
-   public native spawn/details metadata first. It must identify the selected custom
-   role. When it exposes model or effort, compare them with the role pin.
-
-   If public details omit model or effort and the local rollout is accessible, resolve
-   `../../scripts/inspect-agent-runtime.sh` relative to this SKILL.md and run:
-
-   ~~~sh
-   skill_dir=<directory-containing-this-SKILL.md>
-   runtime_inspector="$skill_dir/../../scripts/inspect-agent-runtime.sh"
-   sh "$runtime_inspector" <native-subagent-thread-id>
-   ~~~
-
-   The helper's allowlisted output is the authoritative local fallback for omitted
-   model and effort. If public and local values both exist, they must agree. Accepted
-   values are Luna / max for routine work, Terra / high for escalation, and Sol / high
-   for review. Missing, inconsistent, unavailable, or unobservable routing stops that
-   lane.
-
-4. For every Sol review, capture the observed sandbox policy type and permission
-   profile type. The shipped reviewer requests read-only sandboxing, but the host may
-   broaden it. Never call the review OS-enforced read-only unless the observed sandbox
-   policy type is `read-only`.
-
-The custom-agent TOML, not the spawn call, pins model and effort. Never add per-spawn
-model or reasoning overrides.
+Terra / High is also the explicit choice when the complexity is known before
+delegation. There is no silent role, model, effort, or native-lane fallback.
 
 ## Keep architect work in the primary session
 
@@ -116,70 +67,31 @@ Keep these responsibilities in the primary session:
 
 - Resolve requirements and material ambiguity.
 - Choose architecture, interfaces, and decomposition.
-- Write the complete five-part implementation specification.
+- Write the complete five-part worker specification.
 - Inspect the actual diff and rerun verification.
-- Judge worker findings and reviewer feedback, decide escalation, and accept the deliverable.
+- Decide whether a correction or immediate Terra escalation is warranted.
+- Judge the reviewer verdict and accept the deliverable.
 
-Do not type implementation code, tests, boilerplate, or mechanical configuration in
-the primary session when the selected delegated lane can do it. If the Luna result is
-wrong, correct the specification and delegate one bounded correction to Luna. If that
-corrected attempt exposes a lane misclassification, escalate the work to Terra / High
-with a corrected specification. Do not silently repair a failed child patch or hide an
-unresolved correction.
+Every worker prompt must contain OBJECTIVE, FILES AND OWNERSHIP, INTERFACES,
+CONSTRAINTS, VERIFICATION, and the structured implementation return in
+[the role contracts](references/role-contracts.md). State the exact owned files,
+preserve concurrent edits, and never silently widen scope.
 
-## Route implementation through native roles
+Treat worker reports as claims. Confirm the complete diff, changed-file scope, requested
+checks, and artifact/runtime evidence in the parent session. Do not implement the
+worker's fix in the primary session when the selected native role can do it.
 
-Give each worker one owned file set or bounded responsibility. State that it is not
-alone in the codebase, must preserve other edits, and must adapt to concurrent
-changes. Run independent non-overlapping work concurrently only when useful. Keep
-shared-file edits and dependency chains serial.
+## Require the fresh Sol review
 
-Every implementation prompt must contain the five sections in
-[the role contracts](references/role-contracts.md): OBJECTIVE, FILES AND OWNERSHIP,
-INTERFACES, CONSTRAINTS, and VERIFICATION, followed by the structured return. Give a
-failed lane a corrected specification; never repeat an unchanged prompt.
+After the parent verifies either the routine Luna result or an escalated Terra result,
+spawn a new native Sol / High reviewer. The reviewer must remain behaviorally
+read-only, inspect the actual accumulated diff, and return exactly ship, fix-first, or
+rethink. A reviewer never implements its own fixes.
 
-## Verify every implementation
+- ship: report completion with the verification evidence.
+- fix-first: delegate the required correction, verify again, and obtain a new review.
+- rethink: revise the architecture and do not report completion.
 
-Treat worker reports as claims. Before acceptance:
-
-1. Inspect the working tree and complete diff.
-2. Confirm only in-scope files changed.
-3. Rerun the specification's verification commands in the primary session.
-4. Compare the evidence with the objective, interfaces, and constraints.
-5. Delegate corrections through the same appropriate native role and repeat parent
-   verification. Escalate only under the explicit Terra rule above.
-
-## Require the final Sol review
-
-After native implementation and parent verification, always spawn a new, fresh
-reviewer:
-
-~~~text
-agent_type: sol_advisor_sol_reviewer
-fork_turns: none
-~~~
-
-The role pins Sol / High and requests a read-only sandbox. Omit per-spawn model and
-reasoning fields. Instruct the reviewer to remain behaviorally read-only, inspect the
-actual files and accumulated diff, and return exactly `ship`, `fix-first`, or
-`rethink`.
-
-- `ship`: report completion with verification evidence.
-- `fix-first`: delegate the required fixes, verify again, and obtain a new review.
-- `rethink`: revise architecture and do not report completion.
-
-Never let the reviewer implement its own fixes. A fix invalidates the prior verdict;
-run a new fresh review after the corrected implementation.
-
-Apply the observed isolation, not requested isolation:
-
-- If it is `read-only`, isolation is enforced.
-- If the host broadens it, proceed only when hard isolation is not required, the
-  prompt forbids edits, and the parent captures and verifies exact before-and-after
-  repository and artifact state. Report the observed sandbox and permission profile.
-- If hard isolation is required, the sandbox is unobservable, or any mutation occurs,
-  stop the review and do not claim read-only isolation or hide the mutation.
-
-Use the complete native packet and return schema in
-[references/role-contracts.md](references/role-contracts.md).
+Any implementation correction invalidates the prior verdict. Apply the observed sandbox
+and permission profile rules in the operations reference; never claim enforced
+read-only isolation when it was not observed.

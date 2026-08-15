@@ -1,7 +1,7 @@
 {
   "name": "sol-advisor",
-  "version": "0.5.0",
-  "description": "Codex-native architect workflow with a default native Luna / Max routine lane, explicit Terra / High escalation, and fresh Sol / High review.",
+  "version": "0.5.1",
+  "description": "Codex-native architect workflow with default native Luna / Max routine implementation, explicit Terra / High escalation, and fresh Sol / High review.",
   "author": {"name": "Daniel McAteer", "url": "https://github.com/DannyMac180"},
   "homepage": "https://github.com/DannyMac180/sol-advisor#readme",
   "repository": "https://github.com/DannyMac180/sol-advisor",
@@ -11,11 +11,11 @@
   "interface": {
     "displayName": "Sol Advisor",
     "shortDescription": "Plan with Sol, implement routine work with native Luna / Max, escalate complex work to Terra / High, and review with fresh Sol.",
-    "longDescription": "Sol Advisor keeps GPT-5.6 Sol / High in the primary session for architecture, decomposition, verification, and acceptance. Separately installed native GPT-5.6 Luna / Max handles the default bounded routine work; the primary explicitly escalates judgment-heavy or high-risk work, or a corrected routine misclassification, to GPT-5.6 Terra / High; a fresh GPT-5.6 Sol / High reviewer must approve the final diff.",
+    "longDescription": "Sol Advisor keeps GPT-5.6 Sol / High in the primary session for architecture, decomposition, verification, and acceptance. Separately installed native GPT-5.6 Luna / Max handles the default bounded routine work; when complexity or risk is known up front or revealed by Luna, the primary escalates immediately to GPT-5.6 Terra / High, while one Luna retry is reserved for a specification that was incomplete or wrong; a fresh GPT-5.6 Sol / High reviewer must approve the final diff.",
     "developerName": "Daniel McAteer",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://github.com/DannyMac180/sol-advisor",
-    "defaultPrompt": ["Use Sol Advisor: Sol plans, Luna / Max implements routine work, parent verifies, and fresh Sol / High reviews.", "Escalate judgment-heavy or high-risk work to Terra / High, then obtain the fresh Sol / High review before completion."]
+    "defaultPrompt": ["Use Sol Advisor: Sol plans, Luna / Max implements routine work, parent verifies, and fresh Sol / High reviews.", "Escalate immediately when work is judgment-heavy/high-risk; obtain the fresh Sol / High review before completion."]
   }
 }
