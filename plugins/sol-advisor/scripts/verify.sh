@@ -1,5 +1,5 @@
 #!/bin/sh
-# Repository-local verification for Sol Advisor's native three-role architecture.
+# Repository-local verification for Sol Advisor's selective native three-role architecture.
 
 set -eu
 
@@ -163,14 +163,14 @@ test ! -e "$retired_contract" || fail "retired separate workflow contract remain
 pass "required files present and retired contract absent"
 
 jq empty "$manifest"
-[ "$(jq -r '.version' "$manifest")" = 0.5.1 ] || fail "manifest version is not 0.5.1"
-grep -Fq 'default native Luna / Max' "$manifest" || fail "manifest omits default Luna routing"
-grep -Fq 'GPT-5.6 Terra / High' "$manifest" || fail "manifest omits Terra escalation"
-grep -Fq 'fresh GPT-5.6 Sol / High' "$manifest" || fail "manifest omits fresh Sol review"
-grep -Fq 'known up front or revealed by Luna' "$manifest" || fail "manifest omits immediate Terra semantics"
-grep -Fq 'one Luna retry is reserved' "$manifest" || fail "manifest omits specification-error retry semantics"
-if grep -Fq 'corrected Luna specification when' "$manifest"; then fail "manifest implies corrected Luna work is sent to Terra"; fi
-pass "manifest JSON, v0.5.1 release, and routing language"
+[ "$(jq -r '.version' "$manifest")" = 0.6.0 ] || fail "manifest version is not 0.6.0"
+grep -Fq 'SELECTIVE ROUTE' "$manifest" || fail "manifest omits route declaration"
+grep -Fq 'solo is the default' "$manifest" || fail "manifest omits solo default"
+grep -Fq 'delegate uses native GPT-5.6 Luna / Max' "$manifest" || fail "manifest omits delegate role contract"
+grep -Fq 'audit uses a fresh read-only GPT-5.6 Sol / High review' "$manifest" || fail "manifest omits audit contract"
+grep -Fq 'full combines one selected implementer' "$manifest" || fail "manifest omits exceptional full contract"
+grep -Fq 'fails closed' "$manifest" || fail "manifest omits fail-closed evidence rule"
+pass "manifest JSON, v0.6.0 release, and selective-routing language"
 
 python3 - "$templates" <<'PY'
 from pathlib import Path
@@ -398,39 +398,50 @@ done
 grep -Fq 'references/operations.md' "$skill" || fail "skill does not link operations reference"
 grep -Fq '../../scripts/install-agents.sh' "$operations" || fail "operations does not resolve installer relatively"
 grep -Fq '../../scripts/inspect-agent-runtime.sh' "$operations" || fail "operations does not resolve inspector relatively"
-grep -Fq 'normal routine path, run the selective Luna+Sol' "$skill" || fail "skill omits routine Luna/Sol starting path"
-grep -Fq 'known complexity or high-risk work, run the selective Terra+Sol' "$skill" || fail "skill omits up-front Terra/Sol starting path"
-grep -Fq 'Do not require Luna exposure' "$skill" || fail "skill preflights Luna on the up-front Terra path"
-grep -Fq 'reuse the task-cached Sol result' "$skill" || fail "skill does not reuse cached Sol on escalation"
+grep -Fq 'SELECTIVE ROUTE' "$skill" || fail "skill omits route declaration"
+grep -Fq 'mode: solo | delegate | audit | full' "$skill" || fail "skill omits exact route modes"
+grep -Fq 'No task tool call may precede this declaration' "$skill" || fail "skill permits tool-before-route"
+grep -Fq 'Solo is the default' "$skill" || fail "skill omits solo default"
+grep -Fq 'One auxiliary agent is the default maximum' "$skill" || fail "skill omits auxiliary limit"
+grep -Fq 'A later declaration may only escalate the route when newly' "$skill" || fail "skill omits escalation gate"
+grep -Fq 'never silently downgrade' "$skill" || fail "skill permits silent downgrade"
 grep -Fqi 'public metadata' "$skill" || fail "skill lacks public-metadata evidence rule"
 grep -Fqi 'local inspector' "$skill" || fail "skill lacks runtime fallback rule"
 grep -Fqi 'parent captures and verifies exact before-and-after' "$contracts" || fail "contracts lack behavioral read-only state check"
-grep -Fq 'normal routine path, run the selective Luna+Sol' "$contracts" || fail "contracts omit routine Luna/Sol starting path"
-grep -Fq 'known complexity or high-risk work, run the selective Terra+Sol' "$contracts" || fail "contracts omit up-front Terra/Sol starting path"
-grep -Fqi 'do not require Luna exposure' "$contracts" || fail "contracts preflight Luna on the up-front Terra path"
-grep -Fq 'reuse the task-cached Sol result' "$contracts" || fail "contracts do not reuse cached Sol on escalation"
-grep -Fqi 'first Luna result' "$skill" || fail "skill omits immediate Terra escalation"
-grep -Fqi 'not a prerequisite' "$skill" || fail "skill makes corrected Luna mandatory"
-grep -Fqi 'first result' "$contracts" || fail "contracts omit immediate Terra escalation"
+for mode in solo delegate audit full; do
+  grep -Fq "\`$mode\`" "$skill" || fail "skill omits $mode mode"
+  grep -Fq "\`$mode\`" "$contracts" || fail "contracts omit $mode mode"
+done
+grep -Fqi 'auxiliary work must substitute for root work' "$skill" || fail "skill permits duplicate auxiliary work"
+grep -Fqi 'auxiliary work substitutes for root work' "$contracts" || fail "contracts permit duplicate auxiliary work"
+grep -Fqi 'first Luna result' "$contracts" || fail "contracts omit Luna-to-Terra escalation"
 grep -Fqi 'not a prerequisite' "$contracts" || fail "contracts make corrected Luna mandatory"
-pass "native role contracts, task-scoped preflight, and escalation checks"
+grep -Fq 'do not request a fresh review' "$skill" || fail "skill makes delegate review mandatory"
+grep -Fq '`solo` and `delegate` do not receive a fresh reviewer' "$skill" || fail "skill makes solo/delegate review mandatory"
+grep -Fq 'audit: the root implements the required correction, re-verifies, and obtains a new' "$skill" || fail "skill does not assign audit corrections to root"
+grep -Fq 'full: the selected implementer handles the required correction, the root' "$skill" || fail "skill does not assign full corrections to selected implementer"
+if grep -Fq 'fix-first: delegate the required correction' "$skill"; then fail "skill retains unconditional fix-first delegation"; fi
+grep -Fq 'On `fix-first`, the root implements the' "$contracts" || fail "contracts do not assign audit corrections to root"
+grep -Fq 'On `fix-first`, the selected implementer handles the correction' "$contracts" || fail "contracts do not assign full corrections to selected implementer"
+if grep -Fqi 'commitment-boundary sol consult' "$contracts"; then fail "contracts retain an ungated commitment-boundary consult"; fi
+pass "native role contracts, selective route declaration, escalation, and correction checks"
 
 for phrase in \
   'agent_type: sol_advisor_luna_implementer' \
   'agent_type: sol_advisor_terra_implementer' \
   'agent_type: sol_advisor_sol_reviewer' \
   'fork_turns: none' \
-  'task-scoped preflight' \
-  'normal routine path' \
-  'known complexity or high-risk work' \
-  'Terra+Sol' \
-  'reuse the successful Sol result' \
+  'SELECTIVE ROUTE' \
+  'solo | delegate | audit | full' \
+  'Solo is the default' \
+  'one auxiliary is the default maximum' \
+  'only to escalate when' \
   'local inspector' \
   'sandbox_mode = read-only' \
   'install-agents.sh --check'; do
   grep -Fqi "$phrase" "$operations" || fail "operations reference omits: $phrase"
 done
-pass "operations reference preserves native operational detail"
+pass "operations reference preserves selective native operational detail"
 
 readme_lines=$(wc -l < "$readme" | tr -d ' ')
 [ "$readme_lines" -le 110 ] || fail "README remains maintainer-sized ($readme_lines lines)"
@@ -444,17 +455,17 @@ if grep -Fq -- '--check' "$readme"; then
   fail "README quick start repeats the post-install --check"
 fi
 grep -Fq 'advanced native operations' "$readme" || fail "README omits operations link"
-if grep -Fq 'or after one corrected Luna attempt' "$readme" ||
-   grep -Fq 'corrected Luna attempt shows' "$readme"; then
-  fail "README hero retains mandatory-retry Terra language"
-fi
-grep -Fq 'selected up front, or immediately' "$readme" || fail "README hero omits immediate Terra semantics"
-grep -Fq 'You do not need to select or manage' "$readme" || fail "README asks users to manage lanes"
-grep -Fq '## When Terra is used' "$readme" || fail "README omits Terra exception guidance"
-grep -Fq 'Luna / Max access for the normal routine path' "$readme" || fail "README omits routine Luna access requirement"
-grep -Fq 'GPT-5.6 Terra / High access is needed' "$readme" || fail "README omits conditional Terra access requirement"
-grep -Fq 'only when escalation is selected.' "$readme" || fail "README implies unconditional Terra access"
-grep -Fq 'Terra / High access is conditional' "$readme" || fail "README omits conditional Terra access guidance"
+grep -Fq '| `solo` |' "$readme" || fail "README route table omits solo"
+grep -Fq '| `delegate` |' "$readme" || fail "README route table omits delegate"
+grep -Fq '| `audit` |' "$readme" || fail "README route table omits audit"
+grep -Fq '| `full` |' "$readme" || fail "README route table omits full"
+grep -Fq 'Solo is the default.' "$readme" || fail "README omits solo default"
+grep -Fq 'One auxiliary is the default maximum' "$readme" || fail "README omits auxiliary limit"
+grep -Fq 'before the first task tool call' "$readme" || fail "README omits route-before-tools rule"
+grep -Fq 'newly observed' "$readme" || fail "README omits escalation gate"
+grep -Fq 'never silently downgrades' "$readme" || fail "README permits silent downgrade"
+grep -Fq 'need to select or manage a lane' "$readme" || fail "README asks users to manage lanes"
+grep -Fq 'Luna / Max or Terra / High access is needed only when' "$readme" || fail "README omits conditional delegate access"
 python3 - "$readme" <<'PY'
 from pathlib import Path
 import sys
@@ -476,7 +487,7 @@ for line in install_lines:
         raise SystemExit(f"installer executes before directory/file guards: {line}")
 print("two companion install examples are fail-closed and guarded")
 PY
-pass "README is concise, user-first, and keeps maintainer machinery out"
+pass "README is concise, user-first, route-tabled, and keeps maintainer machinery out"
 
 python3 - "$readme" "$manifest" "$skill" "$contracts" "$operations" "$ui" "$templates" <<'PY'
 from pathlib import Path
@@ -513,14 +524,14 @@ for path in paths:
 print("obsolete workflow references are absent")
 PY
 
-grep -Fq 'Sol / High plans' "$readme" || fail "README omits plain normal path"
-grep -Fq 'Luna / Max' "$readme" || fail "README omits Luna / Max routine path"
-grep -Fq 'Terra /' "$readme" || fail "README omits Terra escalation path"
-grep -Fq 'one corrected Luna attempt' "$readme" || fail "README omits corrected-attempt escalation"
+grep -Fq 'Sol / High runs the show' "$readme" || fail "README omits primary ownership"
+grep -Fq 'Luna / Max' "$readme" || fail "README omits Luna / Max delegate path"
+grep -Fq 'Terra / High' "$readme" || fail "README omits Terra delegate path"
+grep -Fq 'Auxiliary work substitutes' "$readme" || fail "README omits substitution rule"
 grep -Fq 'Attention Heads' "$readme" || fail "README lost Attention Heads section"
 grep -Fq 'https://attentionheads.substack.com/?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor' "$readme" || fail "README changed Attention Heads link"
 grep -Fq 'https://attentionheads.substack.com/subscribe?utm_source=github&utm_medium=readme&utm_campaign=sol-advisor' "$readme" || fail "README changed Subscribe link"
-pass "README normal path, escalation, and preserved Go deeper links"
+pass "README selective routing and preserved Go deeper links"
 
 for document in "$readme" "$manifest" "$skill" "$contracts" "$ui"; do
   if grep -Eqi 'Terra / High is the sole implementation producer|one role-pinned .*handles all implementation|route all implementation through.*Terra|delegate all implementation to (the )?(native )?Terra' "$document"; then
@@ -537,4 +548,4 @@ sh -n "$runtime_inspector"
 sh -n "$script_dir/verify.sh"
 pass "shell syntax"
 
-printf '%s\n' "VERIFY PASSED: Sol Advisor native three-role checks completed in $tmp_dir"
+printf '%s\n' "VERIFY PASSED: Sol Advisor v0.6.0 selective routing checks completed in $tmp_dir"

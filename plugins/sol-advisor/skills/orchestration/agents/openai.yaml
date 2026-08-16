@@ -1,4 +1,4 @@
 interface:
   display_name: "Sol Advisor Orchestration"
-  short_description: "Use native Luna / Max by default, escalate to Terra / High when needed, then verify and accept with fresh Sol / High"
-  default_prompt: "Use $orchestration: Sol plans, Luna / Max handles routine work, Terra / High is immediate escalation when needed, and fresh Sol / High reviews."
+  short_description: "Declare a risk-gated solo, delegate, audit, or exceptional full route before task tools"
+  default_prompt: "Use $orchestration to declare a SELECTIVE ROUTE before task tools; default to solo and select delegation, audit, or exceptional full only when risk justifies it."

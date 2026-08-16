@@ -10,9 +10,9 @@ The installed TOMLs are the source of truth:
 
 | Role type | Model | Effort | Use |
 |---|---|---|---|
-| sol_advisor_luna_implementer | gpt-5.6-luna | max | Default bounded routine implementation |
-| sol_advisor_terra_implementer | gpt-5.6-terra | high | Explicit judgment-heavy/high-risk escalation |
-| sol_advisor_sol_reviewer | gpt-5.6-sol | high | Fresh final review; requests read-only sandbox |
+| sol_advisor_luna_implementer | gpt-5.6-luna | max | Delegate/full bounded routine implementation |
+| sol_advisor_terra_implementer | gpt-5.6-terra | high | Delegate/full judgment-heavy or high-risk implementation |
+| sol_advisor_sol_reviewer | gpt-5.6-sol | high | Audit/full fresh review; requests read-only sandbox |
 
 Native spawn requests name the role and use a fresh context:
 
@@ -21,14 +21,14 @@ agent_type: sol_advisor_luna_implementer
 fork_turns: none
 ~~~
 
-Use the Terra type only when escalation is selected:
+Use the Terra type only when the selected delegate or full route needs it:
 
 ~~~text
 agent_type: sol_advisor_terra_implementer
 fork_turns: none
 ~~~
 
-Always use a fresh Sol reviewer after parent verification:
+Use a fresh Sol reviewer only for audit or full after parent verification:
 
 ~~~text
 agent_type: sol_advisor_sol_reviewer
@@ -38,7 +38,7 @@ fork_turns: none
 Do not attach model or reasoning overrides. A missing, conflicting, unavailable, or
 unobservable role/model/effort is a hard stop; never substitute another role.
 
-## Task-scoped preflight and caching
+## Selective route declaration, preflight, and caching
 
 The primary session must be Sol / High. Companion installation is separate from task
 routing because plugin installation does not register user-owned TOMLs.
@@ -65,51 +65,49 @@ recognizes only byte-exact historical templates, including the shipped v0.2.0 pr
 and the v0.5.0 Luna/Terra profiles during a v0.5.1 update. Modified/unsafe/nonregular/
 symlinked/conflicting destinations remain refusals, and all mutations are preflighted.
 
-The existing --check flag verifies all three roles. For task-scoped preflight, choose
-the starting path and use the repeatable selective form; each check is non-mutating
-and fail-closed.
+The root emits one machine-auditable declaration before its first task tool call:
 
-For the normal routine path, check Luna+Sol:
-
-~~~sh
-sh plugins/sol-advisor/scripts/install-agents.sh --check --check-role luna --check-role sol
+~~~text
+SELECTIVE ROUTE
+mode: solo | delegate | audit | full
+risk: <concise, task-specific rationale>
 ~~~
 
-For known complexity or high-risk work selected up front, check Terra+Sol instead;
-Luna does not block this path:
+Solo is the default. One auxiliary is the default maximum; full is an explicit broad
+or high-risk exception. The root may emit a later declaration only to escalate when
+newly observed risk justifies it. It records that evidence and never silently
+downgrades.
+
+The existing --check flag verifies all three roles. For task-scoped preflight, check
+only the auxiliaries selected by the declaration; every check is non-mutating and
+fail-closed:
+
+| Route | Required companion checks |
+|---|---|
+| solo | None |
+| delegate (Luna) | `--check --check-role luna` |
+| delegate (Terra) | `--check --check-role terra` |
+| audit | `--check --check-role sol` |
+| full (Luna) | `--check --check-role luna --check-role sol` |
+| full (Terra) | `--check --check-role terra --check-role sol` |
+
+For example:
 
 ~~~sh
-sh plugins/sol-advisor/scripts/install-agents.sh --check --check-role terra --check-role sol
-~~~
-
-When Terra escalation follows a Luna result, check Terra separately and reuse the successful Sol result cached for the task:
-
-~~~sh
-sh plugins/sol-advisor/scripts/install-agents.sh --check --check-role terra
+sh plugins/sol-advisor/scripts/install-agents.sh --check --check-role luna
+sh plugins/sol-advisor/scripts/install-agents.sh --check --check-role sol
 ~~~
 
 Unknown or missing role arguments fail before any destination mutation. A selective
-check ignores unselected role destinations, so a conflicting Terra file cannot block
-normal Luna / Sol preflight and a conflicting Luna file cannot block up-front Terra /
-Sol preflight; the all-role --check behavior remains unchanged.
+check ignores unselected role destinations, while the all-role --check behavior
+remains unchanged. Cache successful checks only for the task; never carry them across
+later tasks, installation/update, or routing/configuration changes.
 
-For each task, cache native preflight results for that task only:
-
-1. Confirm the primary Sol / High session.
-2. Before normal routine delegation, run the selective Luna / Sol check above, then
-   confirm native exposure of Luna and the fresh Sol reviewer. Compare public
-   role/model/effort metadata when it is available.
-3. Do not require Terra exposure for the normal path. If the first Luna result clearly
-   demonstrates judgment-heavy, high-risk, or misclassified work, select Terra and then
-   run the selective Terra check and confirm Terra exposure and its public pin before
-   spawning it.
-4. If the specification was incomplete or wrong, send one corrected Luna
-   specification. A corrected attempt is not a mandatory toll before Terra; an
-   immediate Terra escalation remains valid when the result itself demonstrates
-   complexity or risk.
-5. Do not repeat successful role preflight before every delegation in the same task.
-   Never carry a cached result into a later task, after an installation/update, or
-   after a routing/configuration change.
+Luna / Max is for bounded, fully specified work. Terra / High is selected for
+judgment-heavy, high-risk, context-heavy, or wide-blast-radius work. A Luna result
+may justify a declared Terra escalation only when it shows newly observed risk. One
+corrected Luna attempt is reserved for a specification error and is not a prerequisite
+for Terra.
 
 If public metadata omits model or effort, use the local inspector below as a fallback
 for those omitted fields only. Do not use it to replace available public evidence.
@@ -138,9 +136,10 @@ conflicting model/effort/sandbox/permission/working-directory values. It never p
 prompts, messages, environment variables, tokens, configuration, or arbitrary rollout
 payloads.
 
-Accepted routing is Luna / max for routine work, Terra / high for escalation, and Sol /
-high for review. If public and local evidence both exist, they must agree. The local
-inspector is not a model-selection fallback.
+Accepted routing is Luna / max for bounded delegate/full implementation, Terra / high
+for higher-risk delegate/full implementation, and Sol / high for audit/full review.
+If public and local evidence both exist, they must agree. The local inspector is not a
+model-selection fallback.
 
 ## Read-only reviewer interpretation
 
@@ -171,9 +170,12 @@ It must also request the structured implementation report. The parent owns archi
 complete diff inspection, verification reruns, correction/escalation decisions, and
 acceptance. Worker claims never replace direct inspection.
 
-For routine work, the primary verifies the Luna result and then requests the fresh Sol
-review. For explicit Terra escalation, the primary verifies the Terra result and then
-requests the same fresh Sol review. A reviewer never fixes its own findings.
+In solo, the root plans, implements, tests, and self-reviews with no auxiliary. In
+delegate, one selected Luna or Terra implementer completes the spec and the root
+verifies with no fresh reviewer. In audit, the root implements and verifies, then a
+fresh Sol reviewer reviews. In full, one selected implementer completes the spec, the
+root verifies, and a fresh Sol reviewer reviews. Auxiliary work substitutes for root
+work; it does not duplicate it. A reviewer never fixes its own findings.
 
 ## Maintainer verification
 
@@ -186,6 +188,6 @@ git status --short
 git diff --stat
 ~~~
 
-The verifier covers the v0.5.1 manifest, exact three-role TOMLs, native routing
+The verifier covers the v0.6.0 manifest, exact three-role TOMLs, selective-routing
 contracts, concise README journey, absence of retired workflow references, installer
 safety fixtures, Luna runtime evidence, JSON/TOML validity, and shell syntax.

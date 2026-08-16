@@ -1,13 +1,11 @@
 # Sol Advisor
 
-**Sol runs the show. Normal delivery is Sol / High plans → native Luna / Max
-implements routine work → the parent verifies → a fresh Sol / High reviews. Terra /
-High can be selected up front, or immediately when a Luna result reveals
-judgment-heavy or high-risk work.**
+**Sol / High runs the show. It declares a risk-gated route before task tools, keeps
+solo as the default, and uses a single auxiliary only when that improves delivery.**
 
-Sol Advisor is a Codex-only architect workflow for capability-routed software
-delivery. You bring the goal and constraints; Sol owns the plan, the parent verifies
-the actual change, and a fresh Sol review is required before acceptance.
+Sol Advisor is a Codex-only workflow for capability-routed software delivery. You
+bring the goal and constraints; Sol owns the plan, implementation or delegation,
+verification, and acceptance.
 
 ## Go deeper
 
@@ -16,9 +14,8 @@ I write [**Attention Heads**](https://attentionheads.substack.com/?utm_source=gi
 ## Quick start
 
 You need a current Codex CLI or ChatGPT desktop app with plugins enabled, GPT-5.6
-Sol / High for the primary session, native custom-agent support, jq, and GPT-5.6
-Luna / Max access for the normal routine path. GPT-5.6 Terra / High access is needed
-only when escalation is selected.
+Sol / High for the primary session, native custom-agent support, and jq. GPT-5.6
+Luna / Max or Terra / High access is needed only when the selected route delegates.
 
 ~~~sh
 codex plugin marketplace add DannyMac180/sol-advisor --ref main
@@ -34,28 +31,36 @@ after installation so native roles are discovered.
 Use this one prompt in the new task:
 
 ~~~text
-Use $sol-advisor:orchestration to build this feature, verify it, and obtain the fresh Sol review before reporting done.
+Use $sol-advisor:orchestration to build this feature and verify it. Declare the selective route before task tools.
 ~~~
 
 ## What you do
 
-Give Sol the outcome, constraints, and any important repository context. You do not need to select or manage an implementation lane; Sol chooses the route and the parent owns verification and acceptance.
+Give Sol the outcome, constraints, and any important repository context. You do not
+need to select or manage a lane; Sol records the route and owns verification and
+acceptance.
 
-## When Terra is used
+## Routes
 
-Routine-only work needs Luna / Max and Sol / High; Terra / High access is conditional
-and needed only when escalation is selected. Sol selects Terra / High up front when
-the work is judgment-heavy or high-risk, or immediately after Luna reveals that
-complexity or risk. If the specification itself was incomplete or wrong, the parent
-may send one corrected Luna attempt. That retry is only for a specification error, not
-a mandatory step before Terra.
+| Mode | Use it when | Delivery |
+|---|---|---|
+| `solo` | Default; risk is contained. | Root plans, implements, tests, and self-reviews. |
+| `delegate` | A complete spec is better executed by one implementer. | Luna / Max for bounded work, or Terra / High for judgment-heavy or high-risk work; root verifies. |
+| `audit` | Independent final scrutiny matters more than delegation. | Root implements; a fresh read-only Sol / High reviews. |
+| `full` | Explicit broad or high-risk exception. | One selected implementer, root verification, and a fresh Sol / High review. |
+
+Solo is the default. One auxiliary is the default maximum; `full` is the explicit
+exception. Sol emits a `SELECTIVE ROUTE` declaration with the mode and concise risk
+rationale before the first task tool call. It can escalate only when newly observed
+risk justifies it and never silently downgrades.
 
 ## What happens automatically
 
-Sol / High keeps architecture, decomposition, parent verification, escalation
-decisions, and acceptance in the primary task. Luna / Max implements routine work.
-The parent inspects the complete diff and reruns the requested checks. A fresh Sol /
-High reviewer then returns ship, fix-first, or rethink; any fix requires a new review.
+Sol / High keeps architecture, decomposition, route selection, parent verification,
+escalation decisions, and acceptance in the primary task. Auxiliary work substitutes
+for root work; it does not duplicate it. The root inspects the complete diff and
+reruns the requested checks. When the selected route includes a review, a fresh Sol /
+High reviewer returns ship, fix-first, or rethink; any fix requires a new review.
 
 ## Updating
 
