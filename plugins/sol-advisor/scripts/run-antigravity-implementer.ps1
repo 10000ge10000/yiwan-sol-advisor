@@ -44,7 +44,10 @@ param(
     [switch]$TestMode,
 
     [Parameter(Mandatory = $false)]
-    [string]$TestAgyExe = ""
+    [string]$TestAgyExe = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$Model = ""
 )
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -54,6 +57,14 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$effectiveAgyModel = if (-not [string]::IsNullOrWhiteSpace($Model)) {
+    $Model.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($env:AGY_MODEL)) {
+    $env:AGY_MODEL.Trim()
+} else {
+    "gemini-3.8-flash-high"
+}
 
 function Fail([string]$Message, [int]$ExitCode = 1) {
     [Console]::Error.WriteLine("ERROR: $Message")
@@ -680,13 +691,13 @@ if ($modelsProc.ExitCode -ne 0) {
 $hasModel = $false
 foreach ($line in ($modelsOut -split "`r?`n")) {
     $slug = ($line -split "`t| ")[0].Trim()
-    if ($slug -eq "gemini-3.8-flash-high") {
+    if ($slug -eq $effectiveAgyModel) {
         $hasModel = $true
         break
     }
 }
 if (-not $hasModel) {
-    Fail "Required model 'gemini-3.8-flash-high' was not found in 'agy models' output."
+    Fail "Required model '$effectiveAgyModel' was not found in 'agy models' output."
 }
 
 # 6. Query agy CLI version
@@ -730,7 +741,7 @@ if ($SkipGenerationPreflight) {
         $preflightPrompt = "Return only one JSON object with status=ok and nonce=$preflightNonce. Do not create or modify files."
         $preflightArgs = @(
             "--sandbox",
-            "--model", "gemini-3.8-flash-high",
+            "--model", $effectiveAgyModel,
             "--effort", "high",
             "--mode", "accept-edits",
             "--output-format", "json",
@@ -809,8 +820,10 @@ if ($DangerouslySkipPermissions.IsPresent) {
 # 9. Run agy with a hard stage cap, an independent idle watchdog, and live
 # stderr heartbeats. Stdout stays private because it is the signed JSON result.
 $mainArgs = [System.Collections.Generic.List[string]]::new()
+$mainArgs.Add("--add-dir")
+$mainArgs.Add($physicalWorkspace)
 $mainArgs.Add("--model")
-$mainArgs.Add("gemini-3.8-flash-high")
+$mainArgs.Add($effectiveAgyModel)
 $mainArgs.Add("--effort")
 $mainArgs.Add("high")
 $mainArgs.Add("--mode")
@@ -984,8 +997,8 @@ $effortFieldObserved = ($null -ne ($parsedJson.PSObject.Properties['effort'])) -
 $modeFieldObserved = $null -ne ($parsedJson.PSObject.Properties['mode'])
 $cwdFieldObserved = ($null -ne ($parsedJson.PSObject.Properties['cwd'])) -or ($null -ne ($parsedJson.PSObject.Properties['working_directory']))
 
-if ($modelFieldObserved -and $parsedJson.model -ne "gemini-3.8-flash-high") {
-    Fail "Observed agy_result model '$($parsedJson.model)' does not match requested pin 'gemini-3.8-flash-high'"
+if ($modelFieldObserved -and $parsedJson.model -ne $effectiveAgyModel) {
+    Fail "Observed agy_result model '$($parsedJson.model)' does not match requested pin '$effectiveAgyModel'"
 }
 if (($null -ne $parsedJson.PSObject.Properties['effort']) -and $parsedJson.effort -ne "high") {
     Fail "Observed agy_result effort '$($parsedJson.effort)' does not match requested pin 'high'"
@@ -1108,10 +1121,10 @@ foreach ($bad in $forbiddenTokens) {
     }
 }
 
-$hasExitCode = ($verifiedStr -match '(?i)\b(?:exit(?:ed)?(?:\s+with)?(?:\s+(?:code|status))?|return\s+code|code|status)\s*[:=]?\s*\d+\b') -or
+$hasExitCode = ($verifiedStr -match '(?i)\b(?:exit(?:ed)?(?:\s+with)?(?:[_\s]*(?:code|status))?|return[_\s]*code|status[_\s]*code|code|status|rc)\s*[:=]?\s*\d+\b') -or
                ($verifiedStr -match '(?:退出码|返回码|退出代码|返回代码)\s*[:：=]?\s*`?\d+`?') -or
                ($verifiedStr -match '(?i)\bexit\s+\d+\b') -or
-               ($verifiedStr -match '(?i)\(exit\s*(?:code)?\s*[:=]?\s*\d+\)')
+               ($verifiedStr -match '(?i)[\(\[]exit\s*(?:code)?\s*[:=]?\s*\d+[\]\)]')
 
 $hasCmd = $false
 $cmdIndicators = @(
@@ -1155,7 +1168,7 @@ if (-not $hasExitCode -or -not $hasCmd) {
         invocation = [ordered]@{
             provider = "google-antigravity-cli"
             cli_version_observed = $cliVersion
-            model_requested = "gemini-3.8-flash-high"
+            model_requested = $effectiveAgyModel
             model_catalog_exact_match_observed = $true
             effort_requested = "high"
             mode_requested = "accept-edits"

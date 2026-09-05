@@ -1421,6 +1421,7 @@ esac
 printf '%s\n' '{"conversation_id":"mock-conv-123","status":"completed","response":"STATUS: complete\nOBJECTIVE: Valid test specification objective.\nCHANGES: Modified fake-target.txt\nVERIFIED: Executed test command (exit code 0)\nJUDGMENT CALLS: none\nGAPS: none","duration_seconds":1.25,"num_turns":1,"usage":{"prompt_tokens":150,"completion_tokens":300}}'
 exit 0
 MOCK_AGY
+chmod +x "$mock_agy"
 supports_dir_fd=0
 if "$py_bin" -c "import os, sys; sys.exit(0 if hasattr(os, 'supports_dir_fd') and os.open in os.supports_dir_fd and os.link in os.supports_dir_fd else 1)" >/dev/null 2>&1; then
   supports_dir_fd=1

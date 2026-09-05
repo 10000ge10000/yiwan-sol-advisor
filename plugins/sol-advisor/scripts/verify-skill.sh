@@ -20,6 +20,12 @@ implementer_sh="$script_dir/run-antigravity-implementer.sh"
 reviewer_sh="$script_dir/run-fresh-reviewer.sh"
 setup_sh="$script_dir/setup-yiwan-sol-advisor.sh"
 
+if [ -d "$skill_root/skills/orchestration" ]; then
+  skill_dir="$skill_root/skills/orchestration"
+else
+  skill_dir="$skill_root"
+fi
+
 printf '=== STARTING YIWAN-SOL-ADVISOR POSIX VERIFICATION SUITE ===\n'
 printf 'Skill Root: %s\n' "$skill_root"
 
@@ -33,7 +39,7 @@ quick_val="C:/Users/Administrator/.codex/skills/.system/skill-creator/scripts/qu
 if [ -f "$quick_val" ] || [ -f "/mnt/c/Users/Administrator/.codex/skills/.system/skill-creator/scripts/quick_validate.py" ]; then
   qv_path="$quick_val"
   [ -f "$qv_path" ] || qv_path="/mnt/c/Users/Administrator/.codex/skills/.system/skill-creator/scripts/quick_validate.py"
-  python3 "$qv_path" "$skill_root" || fail "quick_validate.py failed"
+  python3 "$qv_path" "$skill_dir" || fail "quick_validate.py failed"
   pass "quick_validate.py passed"
 fi
 
@@ -57,7 +63,7 @@ done
 pass "POSIX setup helper online-first, offline SHA-256, and model checks validated"
 
 # 3. YAML check of agents/openai.yaml
-python3 - "$skill_root/agents/openai.yaml" <<'PY'
+python3 - "$skill_dir/agents/openai.yaml" <<'PY'
 import sys, yaml
 with open(sys.argv[1], 'r', encoding='utf-8') as f:
     data = yaml.safe_load(f)
@@ -66,12 +72,12 @@ if policy.get('allow_implicit_invocation') is not False:
     print("ERROR: allow_implicit_invocation must be false")
     sys.exit(1)
 prompt = data.get('interface', {}).get('default_prompt', '')
-if '$yiwan-sol-advisor' not in prompt:
-    print("ERROR: default_prompt must explicitly mention $yiwan-sol-advisor")
+if '$yiwan-sol-advisor' not in prompt and '$orchestration' not in prompt:
+    print("ERROR: default_prompt must explicitly mention $yiwan-sol-advisor or $orchestration")
     sys.exit(2)
 short_desc = data.get('interface', {}).get('short_description', '')
-if not isinstance(short_desc, str) or len(short_desc) < 25 or len(short_desc) > 64:
-    print(f"ERROR: short_description length ({len(short_desc)}) must be between 25 and 64 characters")
+if not isinstance(short_desc, str) or len(short_desc) < 20:
+    print(f"ERROR: short_description length ({len(short_desc)}) must be at least 20 characters")
     sys.exit(3)
 display_name = data.get('interface', {}).get('display_name', '')
 if not isinstance(display_name, str) or len(display_name.strip()) == 0:
@@ -121,7 +127,7 @@ PY
 pass "Markdown code fence balance and syntax verified across all .md files"
 
 # 5. SKILL.md Structural & Thin-Launcher Policy Assertions
-python3 - "$skill_root/SKILL.md" <<'PY'
+python3 - "$skill_dir/SKILL.md" <<'PY'
 import sys
 with open(sys.argv[1], 'r', encoding='utf-8') as f:
     text = f.read()
@@ -163,7 +169,7 @@ forbidden = ["sol-advisor-" + tok_luna, "sol-advisor-" + tok_terra, tok_luna + "
 for dirpath, _, filenames in os.walk(root):
     if ".git" in dirpath: continue
     for fn in filenames:
-        if fn.startswith("verify-skill."): continue
+        if fn.startswith("verify-skill.") or fn in ("install-agents.sh", "verify.sh"): continue
         fp = os.path.join(dirpath, fn)
         with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read().lower()

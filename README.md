@@ -1,6 +1,11 @@
 # Sol Advisor
 
-**Sol plans and reviews at the user's current reasoning effort; Google Antigravity CLI (Gemini 3.8 Flash High) implements.**
+[![Blog](https://img.shields.io/badge/Blog-910501.xyz-orange)](https://blog.910501.xyz/)
+[![Bilibili](https://img.shields.io/badge/B%E7%AB%99-59438380-00a1d6?logo=bilibili)](https://space.bilibili.com/59438380)
+[![YouTube](https://img.shields.io/badge/YouTube-10000%20AI%20Share-ff0000?logo=youtube&logoColor=white)](https://www.youtube.com/channel/UCqgvZnCN9-9pZcL4SWxmnDw)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**Sol plans and reviews using the user's active Codex model (GPT-6, GPT-5.6, GPT-5.5, etc.) and reasoning effort; Google Antigravity CLI (Gemini 3.8 Flash High) implements.**
 
 Sol Advisor is an orchestration release for high-assurance software delivery. Sol acts as
 architect and reviewer; Antigravity acts as the sole implementation engine.
@@ -11,8 +16,8 @@ I write [**Attention Heads**](https://attentionheads.substack.com/?utm_source=gi
 
 ## Quick start
 
-You need a current Codex CLI or ChatGPT desktop app with plugins enabled, GPT-5.6
-Sol for the primary session at the user's currently selected reasoning effort, native Antigravity CLI (`agy.exe` on Windows, `agy` on Linux/WSL), and jq.
+You need a current Codex CLI or ChatGPT desktop app with plugins enabled, your active Codex
+model (GPT-6, GPT-5.6, GPT-5.5, etc.) at your configured reasoning effort, native Antigravity CLI (`agy.exe` on Windows, `agy` on Linux/WSL), and jq.
 
 ~~~sh
 codex plugin marketplace add DannyMac180/sol-advisor --ref main
@@ -40,20 +45,15 @@ Antigravity dispatching, verification, and final acceptance.
 
 | Stage | Owner | Execution |
 |---|---|---|
-| **1. Plan** | Primary Sol / current effort | Architect design, declare constraints, author 5-part worker specification. |
-| **2. Implement** | Google Antigravity CLI | `gemini-3.8-flash-high` (`--effort high`, `--mode accept-edits`) implements the spec. |
-| **3. Parent Verify** | Primary Sol / current effort | Direct inspection of working-tree diff and rerun of verification commands. |
-| **4. Fresh Review** | Companion Sol / inherited effort | Fresh read-only review returning `ship`, `fix-first`, or `rethink`. |
-| **5. Correction** | Antigravity Loop | `fix-first` corrections route back to Antigravity for implementation. |
+| **1. Plan** | Primary Sol / active model | Architect design, declare constraints, author 5-part worker specification. |
+| **2. Implement** | Google Antigravity CLI | `gemini-3.8-flash-high` (`--effort high`, `--mode accept-edits`, headless sandbox, `--add-dir`) implements the spec. |
+| **3. Parent Verify** | Primary Sol / active model | Direct inspection of working-tree diff, Git metadata digest, and ownership verification. |
+| **4. Fresh Review** | Companion Sol / active model | Fresh read-only review returning `ship`, `fix-first`, or `rethink`. |
+| **5. Correction** | Antigravity Loop | `fix-first` corrections route back to Antigravity with adaptive timeouts. |
 
 ## What happens automatically
 
-Sol at the user's current reasoning effort keeps architecture, decomposition, parent verification, and acceptance in the
-primary task. Implementation is dispatched to the Antigravity launcher and wrapper with a 25m
-hard cap per window, 8m idle timeout, nonce-bound generation preflight, and stderr heartbeats. Plans
-larger than 12 owned paths must be split into independently verifiable phases. The root inspects
-the complete diff and reruns verification. A fresh read-only Sol reviewer evaluates the final diff and
-evidence; fixes route back to Antigravity.
+Sol dynamically inherits the user's active Codex model (GPT-6, GPT-5.6, GPT-5.5, etc.) and reasoning effort, keeping architecture, decomposition, parent verification, and acceptance in the primary task. Implementation executes via Google Antigravity CLI with explicit workspace binding (`--add-dir`), sandboxed headless mode, dynamic phase timeout scaling, multi-language runtime cache isolation, nonce-bound generation preflight, and heartbeat watchdogs. Plans larger than 12 owned paths must be split into independently verifiable phases. The root inspects the complete diff and scoped Git metadata. A fresh read-only Sol reviewer evaluates the final diff and evidence; fixes route back to Antigravity.
 
 ## Updating
 

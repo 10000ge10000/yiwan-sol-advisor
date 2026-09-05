@@ -29,10 +29,16 @@ machine_reserve="2m"
 max_owned_files=6
 max_verification_commands=4
 max_corrections=1
-dangerously_skip_permissions=0
+dangerously_skip_permissions=1
+planner_timeout_specified=0
+implementer_timeout_specified=0
+reviewer_timeout_specified=0
+machine_reserve_specified=0
 test_mode=0
 test_agy_exe=""
 test_codex_bin=""
+model=""
+reasoning_effort=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -56,14 +62,14 @@ while [ $# -gt 0 ]; do
       timeout="$2"
       shift 2
       ;;
-    --planner-timeout) planner_timeout="$2"; shift 2 ;;
+    --planner-timeout) planner_timeout="$2"; planner_timeout_specified=1; shift 2 ;;
     --planner-heartbeat-interval) planner_heartbeat_interval="$2"; shift 2 ;;
     --planner-idle-timeout) planner_idle_timeout="$2"; shift 2 ;;
-    --implementer-timeout) implementer_timeout="$2"; shift 2 ;;
-    --reviewer-timeout) reviewer_timeout="$2"; shift 2 ;;
+    --implementer-timeout) implementer_timeout="$2"; implementer_timeout_specified=1; shift 2 ;;
+    --reviewer-timeout) reviewer_timeout="$2"; reviewer_timeout_specified=1; shift 2 ;;
     --idle-timeout) idle_timeout="$2"; shift 2 ;;
     --generation-preflight-timeout) generation_preflight_timeout="$2"; shift 2 ;;
-    --machine-reserve) machine_reserve="$2"; shift 2 ;;
+    --machine-reserve) machine_reserve="$2"; machine_reserve_specified=1; shift 2 ;;
     --max-owned-files) max_owned_files="$2"; shift 2 ;;
     --max-verification-commands) max_verification_commands="$2"; shift 2 ;;
     --max-corrections)
@@ -71,8 +77,22 @@ while [ $# -gt 0 ]; do
       max_corrections="$2"
       shift 2
       ;;
+    --model)
+      [ $# -ge 2 ] || fail "Missing value for --model"
+      model="$2"
+      shift 2
+      ;;
+    --reasoning-effort)
+      [ $# -ge 2 ] || fail "Missing value for --reasoning-effort"
+      reasoning_effort="$2"
+      shift 2
+      ;;
     --dangerously-skip-permissions)
       dangerously_skip_permissions=1
+      shift 1
+      ;;
+    --enforce-interactive-permissions)
+      dangerously_skip_permissions=0
       shift 1
       ;;
     --test-mode)
@@ -242,6 +262,11 @@ else
 fi
 
 # 6. Execute Python Orchestrator
+any_explicit_phase_budget=0
+if [ "$planner_timeout_specified" -eq 1 ] || [ "$implementer_timeout_specified" -eq 1 ] || [ "$reviewer_timeout_specified" -eq 1 ] || [ "$machine_reserve_specified" -eq 1 ]; then
+  any_explicit_phase_budget=1
+fi
+
 "$py_bin" - \
   "$ws_real" \
   "$task_file_real" \
@@ -266,7 +291,10 @@ fi
   "$effective_test_mode" \
   "$test_agy_exe" \
   "$test_codex_bin" \
-  "$py_bin" <<'PY'
+  "$py_bin" \
+  "$model" \
+  "$reasoning_effort" \
+  "$any_explicit_phase_budget" <<'PY'
 import sys, os, subprocess, json, time, re, hashlib, secrets, stat, signal, threading
 
 (ws_real, task_file_real, result_file, res_parent_real,
@@ -276,11 +304,34 @@ import sys, os, subprocess, json, time, re, hashlib, secrets, stat, signal, thre
  idle_timeout_str, generation_preflight_timeout_str, machine_reserve_str,
  max_owned_files_str, max_verification_commands_str,
  max_corrections_str, danger_perm_str, effective_test_mode_str,
- test_agy_exe, test_codex_bin, py_bin) = sys.argv[1:25]
+ test_agy_exe, test_codex_bin, py_bin, model_arg, effort_arg, any_explicit_budget_str) = sys.argv[1:28]
 
 max_corrections = int(max_corrections_str)
 danger_perm = danger_perm_str == "1"
 test_mode = effective_test_mode_str == "1"
+
+def get_current_codex_config():
+    codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    cfg_path = os.path.join(codex_home, "config.toml")
+    res = {"model": None, "effort": None}
+    if not os.path.isfile(cfg_path):
+        return res
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        m_model = re.search(r'(?m)^\s*model\s*=\s*"([^"]+)"', text)
+        if m_model:
+            res["model"] = m_model.group(1).strip()
+        m_effort = re.search(r'(?m)^\s*model_reasoning_effort\s*=\s*"([^"]+)"', text)
+        if m_effort:
+            res["effort"] = m_effort.group(1).strip()
+    except Exception:
+        pass
+    return res
+
+inherited_codex_cfg = get_current_codex_config()
+effective_codex_model = model_arg.strip() if model_arg.strip() else (os.environ.get("SOL_ADVISOR_MODEL") or os.environ.get("CODEX_MODEL") or inherited_codex_cfg.get("model"))
+effective_reasoning_effort = effort_arg.strip() if effort_arg.strip() else inherited_codex_cfg.get("effort")
 
 def parse_duration(d):
     d = d.strip()
@@ -311,12 +362,38 @@ machine_reserve_sec = parse_duration(machine_reserve_str)
 max_owned_files = int(max_owned_files_str)
 max_verification_commands = int(max_verification_commands_str)
 minimum_iteration_budget_sec = planner_timeout_sec + implementer_timeout_sec + reviewer_timeout_sec + machine_reserve_sec
+
+any_explicit_phase_budget = any_explicit_budget_str == "1"
+is_dynamically_scaled = False
+if any_explicit_phase_budget:
+    if total_timeout_sec < minimum_iteration_budget_sec:
+        raise SystemExit(f"ERROR: total timeout {timeout_str} is too short for one safe iteration; at least {minimum_iteration_budget_sec}s are required")
+else:
+    if total_timeout_sec < minimum_iteration_budget_sec:
+        min_safe_total_sec = 180
+        if total_timeout_sec < min_safe_total_sec:
+            raise SystemExit(f"ERROR: total timeout {timeout_str} is too short for one safe iteration; at least {min_safe_total_sec}s are required")
+        is_dynamically_scaled = True
+        planner_timeout_sec = max(45, int(total_timeout_sec * 0.20))
+        implementer_timeout_sec = max(90, int(total_timeout_sec * 0.50))
+        reviewer_timeout_sec = max(45, int(total_timeout_sec * 0.25))
+        machine_reserve_sec = max(10, total_timeout_sec - (planner_timeout_sec + implementer_timeout_sec + reviewer_timeout_sec))
+        minimum_iteration_budget_sec = 190
+
+        if idle_timeout_sec > implementer_timeout_sec:
+            idle_timeout_sec = implementer_timeout_sec
+        if generation_preflight_timeout_sec >= implementer_timeout_sec:
+            generation_preflight_timeout_sec = max(10, int(implementer_timeout_sec * 0.2))
+        if planner_heartbeat_interval_sec > planner_timeout_sec:
+            planner_heartbeat_interval_sec = max(10, int(planner_timeout_sec * 0.25))
+        if planner_idle_timeout_sec > planner_timeout_sec:
+            planner_idle_timeout_sec = planner_timeout_sec
+        sys.stderr.write(f"INFO: Total timeout ({total_timeout_sec}s) is smaller than default phase budget sum. Dynamically scaled phase budgets: Planner={planner_timeout_sec}s, Implementer={implementer_timeout_sec}s, Reviewer={reviewer_timeout_sec}s, MachineReserve={machine_reserve_sec}s\n")
+
 if idle_timeout_sec > implementer_timeout_sec:
     raise SystemExit("ERROR: idle timeout must not exceed implementer timeout")
 if generation_preflight_timeout_sec >= implementer_timeout_sec:
     raise SystemExit("ERROR: generation preflight timeout must be shorter than implementer timeout")
-if total_timeout_sec < minimum_iteration_budget_sec:
-    raise SystemExit(f"ERROR: total timeout {timeout_str} is too short for one safe iteration; at least {minimum_iteration_budget_sec}s are required")
 start_time = time.time()
 
 active_child_procs = []
@@ -507,6 +584,27 @@ def get_scoped_git_metadata_digest(include_index=True):
 
     return h.hexdigest()
 
+def is_ignored_runtime_cache_path(p):
+    if isinstance(p, bytes):
+        try:
+            p_str = p.decode('utf-8')
+        except Exception:
+            return False
+    else:
+        p_str = str(p)
+    norm = p_str.replace('\\', '/').strip('/')
+    if re.search(r'(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.coverage|\.tox|\.nox)(/|$)', norm):
+        return True
+    if re.search(r'\.(pyc|pyo|pyd)$', norm):
+        return True
+    if re.search(r'(^|/)(node_modules/\.cache|\.npm|\.yarn/cache)(/|$)', norm):
+        return True
+    if re.search(r'(^|/)(\.DS_Store|Thumbs\.db|\.directory)$', norm):
+        return True
+    if re.search(r'\.(tmp|swp|bak)$', norm) or re.search(r'(^|/)\.~', norm):
+        return True
+    return False
+
 def get_repo_fingerprint():
     h = hashlib.sha256()
     h.update(b"HEAD:" + run_git(["rev-parse", "HEAD"]).strip() + b"\n")
@@ -530,6 +628,8 @@ def get_repo_fingerprint():
     untracked_files.sort()
     h.update(b"UNTRACKED_FILES:\n")
     for uf in untracked_files:
+        if is_ignored_runtime_cache_path(uf):
+            continue
         fp = os.path.join(ws_real.encode('utf-8'), uf)
         if os.path.isfile(fp):
             f_len, f_hash = get_file_sha256_and_len(fp)
@@ -601,6 +701,8 @@ def capture_repository_snapshot():
     untracked_raw = run_git(["ls-files", "--others", "--exclude-standard", "-z"])
     for uf in [t for t in untracked_raw.split(b'\0') if t]:
         norm_uf = uf.lstrip(b'/')
+        if is_ignored_runtime_cache_path(norm_uf):
+            continue
         full_uf = os.path.join(ws_real.encode('utf-8'), norm_uf)
         f_len, f_hash = get_file_sha256_and_len(full_uf)
         file_map[norm_uf] = b"UNTRACKED:" + str(f_len).encode('utf-8') + b":" + f_hash.encode('utf-8')
@@ -613,9 +715,13 @@ def capture_repository_snapshot():
 def get_window_delta(pre_snap, post_snap):
     changed_raw = set()
     for k, v in post_snap["file_map"].items():
+        if is_ignored_runtime_cache_path(k):
+            continue
         if k not in pre_snap["file_map"] or pre_snap["file_map"][k] != v:
             changed_raw.add(k)
     for k in pre_snap["file_map"].keys():
+        if is_ignored_runtime_cache_path(k):
+            continue
         if k not in post_snap["file_map"]:
             changed_raw.add(k)
 
@@ -662,6 +768,13 @@ try:
             sys.stderr.write(f"ERROR: Insufficient remaining budget for a safe complete iteration: {remaining_iteration}s remain, {minimum_iteration_budget_sec}s are reserved. No new writer window was started.\n")
             sys.exit(1)
 
+        if not any_explicit_phase_budget and is_dynamically_scaled:
+            current_iter_budget = min(total_timeout_sec, remaining_iteration)
+            planner_timeout_sec = max(45, int(current_iter_budget * 0.20))
+            implementer_timeout_sec = max(90, int(current_iter_budget * 0.50))
+            reviewer_timeout_sec = max(45, int(current_iter_budget * 0.25))
+            machine_reserve_sec = max(10, current_iter_budget - (planner_timeout_sec + implementer_timeout_sec + reviewer_timeout_sec))
+
         iter_dir = os.path.join(run_dir, f"iteration-{iteration}")
         os.makedirs(iter_dir, exist_ok=True)
         print(f"=== [Sol Advisor Iteration {iteration} / {max_corrections + 1}] ===")
@@ -671,9 +784,10 @@ try:
         assert_head_unchanged("before planning stage")
         fp_before_plan = get_repo_fingerprint()
 
+        planner_model_desc = f"model: {effective_codex_model}" if effective_codex_model else "inherited Codex model"
         if iteration == 1:
             planner_prompt = f"""ROLE CONTRACT:
-You are the dedicated GPT-5.6 Sol planner and architect for workspace: {ws_real}. Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
+You are the dedicated Sol planner and architect for workspace: {ws_real} ({planner_model_desc}). Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
 You MUST NOT implement code directly. All code edits are performed exclusively by Google Antigravity CLI.
 Your sandbox is strictly read-only.
 Analyze requirements, inspect workspace conventions, and author an implementation plan.
@@ -706,7 +820,7 @@ You must output ONLY a valid JSON object matching the following schema (no markd
             prior_pv_hash = hashlib.sha256(last_parent_verification_raw.encode('utf-8')).hexdigest()
 
             planner_prompt = f"""ROLE CONTRACT:
-You are the dedicated GPT-5.6 Sol correction planner and architect for workspace: {ws_real}. Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
+You are the dedicated Sol correction planner and architect for workspace: {ws_real} ({planner_model_desc}). Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
 You MUST NOT implement code directly. All code edits are performed exclusively by Google Antigravity CLI.
 Your sandbox is strictly read-only.
 The previous iteration received a FIX-FIRST verdict during review.
@@ -718,7 +832,7 @@ USER TASK:
 {task_content}
 
 PREVIOUS PLAN OBJECTIVE:
-{last_plan.get('objective', '')}
+{last_plan.get('objective')}
 
 PREVIOUS REVIEW ENVELOPE (SHA-256: {prior_review_hash}):
 {prior_review_summary}
@@ -754,14 +868,24 @@ You must output ONLY a valid JSON object matching the following schema (no markd
         plan_msg_file = os.path.join(iter_dir, ".plan-msg.tmp")
         plan_cmd = [
             codex_bin,
-            "exec",
-            "-m", "gpt-5.6-sol",
+            "exec"
+        ]
+        if effective_codex_model:
+            plan_cmd.extend(["-m", effective_codex_model])
+        plan_cmd.extend([
             "-s", "read-only",
             "--ephemeral",
+            "--ignore-user-config"
+        ])
+        if effective_reasoning_effort:
+            plan_cmd.extend(["-c", f'model_reasoning_effort="{effective_reasoning_effort}"'])
+        for feat in ("apps", "plugins", "remote_plugin", "recommended_plugins", "browser_use", "browser_use_external", "computer_use", "in_app_browser", "memories", "image_generation", "workspace_dependencies", "skill_search"):
+            plan_cmd.extend(["--disable", feat])
+        plan_cmd.extend([
             "-C", ws_real,
             "--color", "never",
             "-o", plan_msg_file
-        ]
+        ])
 
         rem_plan_sec = min(planner_timeout_sec, int(total_timeout_sec - (time.time() - start_time)))
         if rem_plan_sec <= 0:
@@ -1051,6 +1175,7 @@ CONSTRAINTS
 - No fallback models or alternate execution providers.
 - Focus strictly on owned files and incremental fixes; do not crawl or re-index the broader repository.
 - Micro-verification only: do not run entire test suites or full regression suites; test only the specific changes or leaf tests relevant to owned files.
+- In your final response under 'VERIFIED:', explicitly record each verification command run and its numeric exit code (e.g., "(exit code 0)").
 
 VERIFICATION
 {ver_cmds_md}
@@ -1176,6 +1301,8 @@ VERIFICATION
         unowned_mods = []
         for cf in window_delta_files:
             norm_cf = cf.strip('/')
+            if is_ignored_runtime_cache_path(norm_cf):
+                continue
             is_owned = False
             for of in plan_obj["owned_files"]:
                 norm_of = of.strip('/')
@@ -1287,6 +1414,10 @@ VERIFICATION
             "--review-output-file", review_out_path,
             "--timeout", f"{rem_rev_sec}s"
         ]
+        if effective_codex_model:
+            rev_cmd.extend(["--model", effective_codex_model])
+        if effective_reasoning_effort:
+            rev_cmd.extend(["--reasoning-effort", effective_reasoning_effort])
         if test_mode:
             rev_cmd.append("--test-mode")
             if test_codex_bin:
@@ -1353,8 +1484,9 @@ VERIFICATION
             if k not in allowed_reviewer_keys:
                 sys.stderr.write(f"ERROR: Unknown key '{k}' in reviewer object (strict schema validation).\n")
                 sys.exit(1)
-        if rev_reviewer.get("model_requested") != "gpt-5.6-sol" or rev_reviewer.get("effort_requested") != "inherited" or rev_reviewer.get("sandbox_mode_requested") != "read-only":
-            sys.stderr.write("ERROR: review-evidence.json reviewer pins mismatch.\n")
+        expected_reviewer_model = effective_codex_model if effective_codex_model else "inherited"
+        if rev_reviewer.get("model_requested") != expected_reviewer_model or rev_reviewer.get("effort_requested") != "inherited" or rev_reviewer.get("sandbox_mode_requested") != "read-only":
+            sys.stderr.write(f"ERROR: review-evidence.json reviewer pins mismatch (expected model '{expected_reviewer_model}', got '{rev_reviewer.get('model_requested')}').\n")
             sys.exit(1)
         if type(rev_reviewer.get("ephemeral")) is not bool or rev_reviewer.get("ephemeral") is not True or type(rev_reviewer.get("repository_unchanged_verified")) is not bool or rev_reviewer.get("repository_unchanged_verified") is not True:
             sys.stderr.write("ERROR: review-evidence.json reviewer booleans must be true.\n")

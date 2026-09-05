@@ -62,13 +62,13 @@ The workflow consists of five stages governed strictly by the launcher state mac
 ```
 
 1. **Architecture & Specification (Dedicated Sol Planner / Corrector)**:
-   - Dedicated `gpt-5.6-sol` process at `max` reasoning effort running in a read-only sandbox (`-s read-only`). On Windows, it inspects a disposable Git mirror outside the canonical workspace because restricted AppContainer processes can fail to traverse dynamic worktrees. The mirror contains tracked and non-ignored working-tree content, while canonical pre/post manifests remain the authority for immutability.
+   - Dedicated Codex process running in a read-only sandbox (`-s read-only`) dynamically using the user's active model (defaulting to the user's configured model such as `gpt-6-astra`, `gpt-5.6-sol`, or `gpt-5.5`, with optional overrides) and configured reasoning effort. On Windows, it inspects a disposable Git mirror outside the canonical workspace because restricted AppContainer processes can fail to traverse dynamic worktrees. The mirror contains tracked and non-ignored working-tree content, while canonical pre/post manifests remain the authority for immutability.
    - Analyzes requirements, checks workspace conventions, and authors `plan.json` and rendered `worker-spec.md` (bounded to <= 24 KiB for command-line safety).
    - Never writes directly to the workspace; pre- and post-planning content fingerprints verify zero modification.
    - In correction iterations (iteration > 1), receives prior review findings, full prior parent verification evidence, full prior implementer evidence, and their verified digests.
 
 2. **Antigravity Implementation**:
-   - Google Antigravity CLI (`gemini-3.8-flash-high`, `--effort high`, `--mode accept-edits`, `--output-format json`) executes the spec within the workspace.
+   - Google Antigravity CLI (`gemini-3.8-flash-high` by default, customizable via `-Model` / `AGY_MODEL`, `--effort high`, `--mode accept-edits`, `--output-format json`) executes the spec within the workspace.
    - Antigravity is the sole implementation provider. Runtime CLI version is observed and preflighted via `agy models` and `agy --version` (installed CLI binaries are observed/preflighted, not version-locked).
    - Attributions bracket the window: computes window delta $\Delta_{window} = S_{post\_impl} - S_{pre\_impl}$. Both destination and source paths of rename/copy records are verified. Any change in $\Delta_{window}$ outside declared `owned_files` fails immediately. Pre-existing dirty files untouched during this window are not attributed to Antigravity.
    - Enforces scoped Git metadata integrity: verifies current HEAD commit hash, symbolic ref, config, hooks, non-HEAD refs, attributes, exclude info, shallow state, and lack of in-progress Git operations.
@@ -79,7 +79,7 @@ The workflow consists of five stages governed strictly by the launcher state mac
    - Binds all stage digests (`task_sha256`, `plan_sha256`, `spec_sha256`, `implementer_evidence_sha256`, `pre_window_manifest_sha256`, `post_window_manifest_sha256`, `repository_manifest_sha256`, `aggregate_delta_manifest_sha256`) in `parent-verification.json`.
 
 4. **Fresh Read-Only Sol Review**:
-   - Launches a separate ephemeral read-only `gpt-5.6-sol` / `max` Codex process. The Windows process starts in an empty disposable root and consumes the complete review bundle from its prompt rather than directly opening the canonical workspace.
+   - Launches a separate ephemeral read-only Codex process using the active model (dynamically inheriting `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.5`, etc.) and configured reasoning effort. The Windows process starts in an empty disposable root and consumes the complete review bundle from its prompt rather than directly opening the canonical workspace.
    - Supplies staged diff (`git diff --cached --binary`) and unstaged diff (`git diff --binary`) separately, untracked files with binary metadata and streaming SHA-256 hashing, implementer evidence, and parent verification evidence within fail-closed presentation caps (diff <= 2MB, untracked text <= 1MB).
    - Evaluates changes in a fresh context and returns `SHIP`, `FIX-FIRST`, or `RETHINK` in structured JSON (`review-evidence.json`) with strictly echoed 64-hex cryptographic bindings.
    - Verifies the reviewed repository remains unmodified via SHA-256 repository manifest of all tracked, staged, and untracked files.

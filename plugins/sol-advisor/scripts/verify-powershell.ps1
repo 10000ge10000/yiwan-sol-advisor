@@ -721,29 +721,32 @@ Unicode: 中文测试 🚀 𝄞 \u00e9 \u2014 and multiline text.
         Fail "Native generation preflight invocation or nonce is missing: $($invocations[2])"
     }
     $invMain = @($invocations[3] | ConvertFrom-Json)
-    if ($invMain.Length -ne 12) {
-        Fail "Expected 12 arguments in standard main invocation; observed $($invMain.Length): $($invocations[3])"
+    if ($invMain.Length -ne 14) {
+        Fail "Expected 14 arguments in standard main invocation; observed $($invMain.Length): $($invocations[3])"
     }
-    if ($invMain[0] -ne "--model" -or $invMain[1] -ne "gemini-3.8-flash-high") {
-        Fail "Native main invocation --model mismatch: $($invocations[2])"
+    if ($invMain[0] -ne "--add-dir" -or $invMain[1] -ne $ws) {
+        Fail "Native main invocation --add-dir mismatch: $($invocations[3])"
     }
-    if ($invMain[2] -ne "--effort" -or $invMain[3] -ne "high") {
-        Fail "Native main invocation --effort mismatch: $($invocations[2])"
+    if ($invMain[2] -ne "--model" -or $invMain[3] -ne "gemini-3.8-flash-high") {
+        Fail "Native main invocation --model mismatch: $($invocations[3])"
     }
-    if ($invMain[4] -ne "--mode" -or $invMain[5] -ne "accept-edits") {
-        Fail "Native main invocation --mode mismatch: $($invocations[2])"
+    if ($invMain[4] -ne "--effort" -or $invMain[5] -ne "high") {
+        Fail "Native main invocation --effort mismatch: $($invocations[3])"
     }
-    if ($invMain[6] -ne "--output-format" -or $invMain[7] -ne "json") {
-        Fail "Native main invocation --output-format mismatch: $($invocations[2])"
+    if ($invMain[6] -ne "--mode" -or $invMain[7] -ne "accept-edits") {
+        Fail "Native main invocation --mode mismatch: $($invocations[3])"
     }
-    if ($invMain[8] -ne "--print-timeout" -or $invMain[9] -ne "25m") {
-        Fail "Native main invocation --print-timeout mismatch: $($invocations[2])"
+    if ($invMain[8] -ne "--output-format" -or $invMain[9] -ne "json") {
+        Fail "Native main invocation --output-format mismatch: $($invocations[3])"
     }
-    if ($invMain[10] -ne "--print") {
-        Fail "Native main invocation --print flag missing: $($invocations[2])"
+    if ($invMain[10] -ne "--print-timeout" -or $invMain[11] -ne "25m") {
+        Fail "Native main invocation --print-timeout mismatch: $($invocations[3])"
+    }
+    if ($invMain[12] -ne "--print") {
+        Fail "Native main invocation --print flag missing: $($invocations[3])"
     }
     # Assert exact full prompt argument equality (byte-for-byte including quotes, carets, percents, unicode, newlines)
-    $capturedPrompt = $invMain[11]
+    $capturedPrompt = $invMain[13]
     if ($capturedPrompt -cne $expectedFullPrompt) {
         Fail "Adversarial prompt argument integrity check failed: captured prompt does not match expected prompt exactly."
     }
@@ -790,31 +793,34 @@ Unicode: 中文测试 🚀 𝄞 \u00e9 \u2014 and multiline text.
         Fail "Expected exactly 4 native agy invocations on dangerous run; observed $($invocationsDanger.Length)"
     }
     $invMainDanger = @($invocationsDanger[3] | ConvertFrom-Json)
-    if ($invMainDanger.Length -ne 13) {
-        Fail "Expected 13 arguments in dangerous main invocation; observed $($invMainDanger.Length): $($invocationsDanger[2])"
+    if ($invMainDanger.Length -ne 15) {
+        Fail "Expected 15 arguments in dangerous main invocation; observed $($invMainDanger.Length): $($invocationsDanger[3])"
     }
-    if ($invMainDanger[0] -ne "--model" -or $invMainDanger[1] -ne "gemini-3.8-flash-high") {
-        Fail "Native dangerous invocation --model mismatch: $($invocationsDanger[2])"
+    if ($invMainDanger[0] -ne "--add-dir" -or $invMainDanger[1] -ne $ws) {
+        Fail "Native dangerous invocation --add-dir mismatch: $($invocationsDanger[3])"
     }
-    if ($invMainDanger[2] -ne "--effort" -or $invMainDanger[3] -ne "high") {
-        Fail "Native dangerous invocation --effort mismatch: $($invocationsDanger[2])"
+    if ($invMainDanger[2] -ne "--model" -or $invMainDanger[3] -ne "gemini-3.8-flash-high") {
+        Fail "Native dangerous invocation --model mismatch: $($invocationsDanger[3])"
     }
-    if ($invMainDanger[4] -ne "--mode" -or $invMainDanger[5] -ne "accept-edits") {
-        Fail "Native dangerous invocation --mode mismatch: $($invocationsDanger[2])"
+    if ($invMainDanger[4] -ne "--effort" -or $invMainDanger[5] -ne "high") {
+        Fail "Native dangerous invocation --effort mismatch: $($invocationsDanger[3])"
     }
-    if ($invMainDanger[6] -ne "--output-format" -or $invMainDanger[7] -ne "json") {
-        Fail "Native dangerous invocation --output-format mismatch: $($invocationsDanger[2])"
+    if ($invMainDanger[6] -ne "--mode" -or $invMainDanger[7] -ne "accept-edits") {
+        Fail "Native dangerous invocation --mode mismatch: $($invocationsDanger[3])"
     }
-    if ($invMainDanger[8] -ne "--print-timeout" -or $invMainDanger[9] -ne "45m") {
-        Fail "Native dangerous invocation --print-timeout mismatch: $($invocationsDanger[2])"
+    if ($invMainDanger[8] -ne "--output-format" -or $invMainDanger[9] -ne "json") {
+        Fail "Native dangerous invocation --output-format mismatch: $($invocationsDanger[3])"
     }
-    if ($invMainDanger[10] -ne "--dangerously-skip-permissions") {
-        Fail "Native dangerous invocation --dangerously-skip-permissions flag missing or misplaced: $($invocationsDanger[2])"
+    if ($invMainDanger[10] -ne "--print-timeout" -or $invMainDanger[11] -ne "45m") {
+        Fail "Native dangerous invocation --print-timeout mismatch: $($invocationsDanger[3])"
     }
-    if ($invMainDanger[11] -ne "--print") {
-        Fail "Native dangerous invocation --print flag missing: $($invocationsDanger[2])"
+    if ($invMainDanger[12] -ne "--dangerously-skip-permissions") {
+        Fail "Native dangerous invocation --dangerously-skip-permissions flag missing or misplaced: $($invocationsDanger[3])"
     }
-    $capturedPromptDanger = $invMainDanger[12]
+    if ($invMainDanger[13] -ne "--print") {
+        Fail "Native dangerous invocation --print flag missing: $($invocationsDanger[3])"
+    }
+    $capturedPromptDanger = $invMainDanger[14]
     if ($capturedPromptDanger -cne $expectedFullPrompt) {
         Fail "Adversarial prompt argument integrity check failed on dangerous run: captured prompt does not match expected prompt exactly."
     }

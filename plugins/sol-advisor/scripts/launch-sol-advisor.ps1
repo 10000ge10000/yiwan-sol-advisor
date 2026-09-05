@@ -69,14 +69,28 @@ param(
     [switch]$DangerouslySkipPermissions,
 
     [Parameter(Mandatory = $false)]
+    [switch]$EnforceInteractivePermissions,
+
+    [Parameter(Mandatory = $false)]
     [switch]$TestMode,
 
     [Parameter(Mandatory = $false)]
     [string]$TestAgyExe = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$TestCodexBin = ""
+    [string]$TestCodexBin = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$Model = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$ReasoningEffort = ""
 )
+
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+} catch {}
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     [Console]::Error.WriteLine("ERROR: PowerShell 7+ (pwsh) is required; detected PowerShell version $($PSVersionTable.PSVersion)")
@@ -116,14 +130,28 @@ function Parse-Duration([string]$d) {
     return $totalSec
 }
 
-function Get-CurrentCodexReasoningEffort {
+function Get-CurrentCodexConfig {
+    $result = @{
+        Model = $null
+        ReasoningEffort = $null
+    }
     $codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { Join-Path $env:USERPROFILE ".codex" } else { $env:CODEX_HOME }
     $configPath = Join-Path $codexHome "config.toml"
-    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $null }
-    $configText = [System.IO.File]::ReadAllText($configPath, [System.Text.UTF8Encoding]::new($false, $true))
-    $match = [regex]::Match($configText, '(?m)^\s*model_reasoning_effort\s*=\s*"(none|minimal|low|medium|high|xhigh|max|ultra)"\s*$')
-    if (-not $match.Success) { return $null }
-    return $match.Groups[1].Value
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $result }
+    try {
+        $configText = [System.IO.File]::ReadAllText($configPath, [System.Text.UTF8Encoding]::new($false, $true))
+        $matchModel = [regex]::Match($configText, '(?m)^\s*model\s*=\s*"([^"]+)"')
+        if ($matchModel.Success) {
+            $result.Model = $matchModel.Groups[1].Value.Trim()
+        }
+        $matchEffort = [regex]::Match($configText, '(?m)^\s*model_reasoning_effort\s*=\s*"([^"]+)"')
+        if ($matchEffort.Success) {
+            $result.ReasoningEffort = $matchEffort.Groups[1].Value.Trim()
+        }
+    } catch {
+        # ignore read errors, return whatever was found
+    }
+    return $result
 }
 
 $totalTimeoutSec = Parse-Duration $Timeout
@@ -136,11 +164,69 @@ $idleTimeoutSec = Parse-Duration $IdleTimeout
 $generationPreflightTimeoutSec = Parse-Duration $GenerationPreflightTimeout
 $machineReserveSec = Parse-Duration $MachineReserve
 $verificationTimeoutSec = Parse-Duration $VerificationTimeout
-$inheritedReasoningEffort = Get-CurrentCodexReasoningEffort
+
+$inheritedCodexConfig = Get-CurrentCodexConfig
+$effectiveCodexModel = if (-not [string]::IsNullOrWhiteSpace($Model)) {
+    $Model.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($env:SOL_ADVISOR_MODEL)) {
+    $env:SOL_ADVISOR_MODEL.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_MODEL)) {
+    $env:CODEX_MODEL.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($inheritedCodexConfig.Model)) {
+    $inheritedCodexConfig.Model
+} else {
+    $null
+}
+
+$effectiveReasoningEffort = if (-not [string]::IsNullOrWhiteSpace($ReasoningEffort)) {
+    $ReasoningEffort.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($inheritedCodexConfig.ReasoningEffort)) {
+    $inheritedCodexConfig.ReasoningEffort
+} else {
+    $null
+}
+$inheritedReasoningEffort = $effectiveReasoningEffort
 $effectiveMaxVerificationCommands = if ([string]::IsNullOrWhiteSpace($TrustedVerificationScript)) { $MaxVerificationCommands } else { [Math]::Min($MaxVerificationCommands, 2) }
 if ($MaxCorrections -lt 0) {
     Fail "MaxCorrections must be non-negative (got $MaxCorrections)."
 }
+
+$hasExplicitPlannerTimeout = $PSBoundParameters.ContainsKey('PlannerTimeout')
+$hasExplicitImplementerTimeout = $PSBoundParameters.ContainsKey('ImplementerTimeout')
+$hasExplicitReviewerTimeout = $PSBoundParameters.ContainsKey('ReviewerTimeout')
+$hasExplicitMachineReserve = $PSBoundParameters.ContainsKey('MachineReserve')
+$anyExplicitPhaseBudget = $hasExplicitPlannerTimeout -or $hasExplicitImplementerTimeout -or $hasExplicitReviewerTimeout -or $hasExplicitMachineReserve
+
+$minimumIterationBudgetSec = $plannerTimeoutSec + $implementerTimeoutSec + $reviewerTimeoutSec + $machineReserveSec
+
+$isDynamicallyScaled = $false
+if ($anyExplicitPhaseBudget) {
+    if ($totalTimeoutSec -lt $minimumIterationBudgetSec) {
+        Fail "Total timeout $Timeout is too short for one safe iteration. It must cover PlannerTimeout + ImplementerTimeout + ReviewerTimeout + MachineReserve (${minimumIterationBudgetSec}s)."
+    }
+} else {
+    # If the user did not explicitly configure phase budgets, dynamically scale them proportionally to fit total timeout
+    if ($totalTimeoutSec -lt $minimumIterationBudgetSec) {
+        $minSafeTotalSec = 180 # absolute minimal floor for an automated iteration (3 min)
+        if ($totalTimeoutSec -lt $minSafeTotalSec) {
+            Fail "Total timeout $Timeout is too short for one safe iteration. It must cover PlannerTimeout + ImplementerTimeout + ReviewerTimeout + MachineReserve (${minimumIterationBudgetSec}s)."
+        }
+        $isDynamicallyScaled = $true
+        $plannerTimeoutSec = [Math]::Max(45, [int]($totalTimeoutSec * 0.20))
+        $implementerTimeoutSec = [Math]::Max(90, [int]($totalTimeoutSec * 0.50))
+        $reviewerTimeoutSec = [Math]::Max(45, [int]($totalTimeoutSec * 0.25))
+        $machineReserveSec = [Math]::Max(10, $totalTimeoutSec - ($plannerTimeoutSec + $implementerTimeoutSec + $reviewerTimeoutSec))
+        $minimumIterationBudgetSec = 190
+
+        if ($idleTimeoutSec -gt $implementerTimeoutSec) { $idleTimeoutSec = $implementerTimeoutSec }
+        if ($generationPreflightTimeoutSec -ge $implementerTimeoutSec) { $generationPreflightTimeoutSec = [Math]::Max(10, [int]($implementerTimeoutSec * 0.2)) }
+        if ($plannerHeartbeatIntervalSec -gt $plannerTimeoutSec) { $plannerHeartbeatIntervalSec = [Math]::Max(10, [int]($plannerTimeoutSec * 0.25)) }
+        if ($plannerIdleTimeoutSec -gt $plannerTimeoutSec) { $plannerIdleTimeoutSec = $plannerTimeoutSec }
+
+        [Console]::Error.WriteLine("INFO: Total timeout (${totalTimeoutSec}s) is smaller than default phase budget sum. Dynamically scaled phase budgets: Planner=${plannerTimeoutSec}s, Implementer=${implementerTimeoutSec}s, Reviewer=${reviewerTimeoutSec}s, MachineReserve=${machineReserveSec}s")
+    }
+}
+
 if ($idleTimeoutSec -gt $implementerTimeoutSec) {
     Fail "IdleTimeout ($IdleTimeout) must be less than or equal to ImplementerTimeout ($ImplementerTimeout)."
 }
@@ -156,9 +242,10 @@ if ($PSBoundParameters.ContainsKey('PlannerIdleTimeout') -and $plannerIdleTimeou
 if ($plannerIdleTimeoutSec -gt $plannerTimeoutSec) {
     $plannerIdleTimeoutSec = $plannerTimeoutSec
 }
-$minimumIterationBudgetSec = $plannerTimeoutSec + $implementerTimeoutSec + $reviewerTimeoutSec + $machineReserveSec
-if ($totalTimeoutSec -lt $minimumIterationBudgetSec) {
-    Fail "Total timeout $Timeout is too short for one safe iteration. It must cover PlannerTimeout + ImplementerTimeout + ReviewerTimeout + MachineReserve (${minimumIterationBudgetSec}s)."
+
+$effectiveSkipPermissions = $true
+if ($EnforceInteractivePermissions.IsPresent) {
+    $effectiveSkipPermissions = $false
 }
 
 # 1. P/Invoke for Win32 path normalization and handle inspection
@@ -775,6 +862,21 @@ function Get-ScopedGitMetadataDigest([string]$WsPath, [bool]$IncludeIndex = $tru
     return $metaHash
 }
 
+# Universal runtime cache and compilation artifact filter
+function Test-IsIgnoredRuntimeCachePath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $norm = $Path.Replace("\", "/").Trim('/')
+    # Python runtime bytecode & cache directories
+    if ($norm -match '(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.coverage|\.tox|\.nox)(/|$)') { return $true }
+    if ($norm -match '\.(pyc|pyo|pyd)$') { return $true }
+    # Node.js / packaging caches
+    if ($norm -match '(^|/)(node_modules/\.cache|\.npm|\.yarn/cache)(/|$)') { return $true }
+    # Editor & OS temporary artifacts
+    if ($norm -match '(^|/)(\.DS_Store|Thumbs\.db|\.directory)$') { return $true }
+    if ($norm -match '\.(tmp|swp|bak)$' -or $norm -match '(^|/)\.~') { return $true }
+    return $false
+}
+
 # 6. Repository Manifest & Snapshot Helpers
 function Get-DeterministicRepoManifest([string]$WsPath) {
     $ms = [System.IO.MemoryStream]::new()
@@ -814,6 +916,8 @@ function Get-DeterministicRepoManifest([string]$WsPath) {
         $uList = $untrackedRaw.Split([char]0, [System.StringSplitOptions]::RemoveEmptyEntries)
         [System.Array]::Sort($uList, [System.StringComparer]::Ordinal)
         foreach ($uf in $uList) {
+            $normUf = $uf.Replace("\", "/").TrimStart('/')
+            if (Test-IsIgnoredRuntimeCachePath $normUf) { continue }
             $fullPath = [System.IO.Path]::Combine($WsPath, $uf)
             if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
                 $fInfo = Get-FileSha256AndLength $fullPath
@@ -921,6 +1025,7 @@ function Capture-RepositorySnapshot([string]$WsPath) {
         $uList = $untrackedRaw.Split([char]0, [System.StringSplitOptions]::RemoveEmptyEntries)
         foreach ($uf in $uList) {
             $normUf = $uf.Replace("\", "/").TrimStart('/')
+            if (Test-IsIgnoredRuntimeCachePath $normUf) { continue }
             $fullUf = [System.IO.Path]::Combine($WsPath, $uf)
             $fInfo = Get-FileSha256AndLength $fullUf
             $map[$normUf] = "UNTRACKED:$($fInfo.Length):$($fInfo.Sha256)"
@@ -937,11 +1042,13 @@ function Get-WindowDelta($PreSnapshot, $PostSnapshot) {
     $changed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($k in $PostSnapshot.FileMap.Keys) {
+        if (Test-IsIgnoredRuntimeCachePath $k) { continue }
         if (-not $PreSnapshot.FileMap.ContainsKey($k) -or ($PreSnapshot.FileMap[$k] -ne $PostSnapshot.FileMap[$k])) {
             $changed.Add($k) | Out-Null
         }
     }
     foreach ($k in $PreSnapshot.FileMap.Keys) {
+        if (Test-IsIgnoredRuntimeCachePath $k) { continue }
         if (-not $PostSnapshot.FileMap.ContainsKey($k)) {
             $changed.Add($k) | Out-Null
         }
@@ -1019,6 +1126,14 @@ try {
             Fail "Insufficient remaining budget for a safe complete iteration: ${remSec}s remain, ${minimumIterationBudgetSec}s are reserved. No new writer window was started."
         }
 
+        if (-not $anyExplicitPhaseBudget -and $isDynamicallyScaled) {
+            $currentIterBudget = [Math]::Min($totalTimeoutSec, $remSec)
+            $plannerTimeoutSec = [Math]::Max(45, [int]($currentIterBudget * 0.20))
+            $implementerTimeoutSec = [Math]::Max(90, [int]($currentIterBudget * 0.50))
+            $reviewerTimeoutSec = [Math]::Max(45, [int]($currentIterBudget * 0.25))
+            $machineReserveSec = [Math]::Max(10, $currentIterBudget - ($plannerTimeoutSec + $implementerTimeoutSec + $reviewerTimeoutSec))
+        }
+
         $iterDir = Join-Path $runDir "iteration-$iteration"
         New-Item -ItemType Directory -Path $iterDir -Force | Out-Null
 
@@ -1032,10 +1147,11 @@ try {
         $fpBeforePlan = Get-DeterministicRepoManifest $physicalWs
         $plannerWs = New-PlannerWorkspaceSnapshot $physicalWs (Join-Path $iterDir "planner-workspace") $baselineHeadSha
 
+        $plannerModelDesc = if (-not [string]::IsNullOrWhiteSpace($effectiveCodexModel)) { "model: $effectiveCodexModel" } else { "inherited Codex model" }
         $plannerPrompt = if ($iteration -eq 1) {
 @"
 ROLE CONTRACT:
-You are the dedicated GPT-5.6 Sol planner and architect for canonical workspace: $physicalWs. Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
+You are the dedicated Sol planner and architect for canonical workspace: $physicalWs ($plannerModelDesc). Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
 You MUST NOT implement code directly. All code edits are performed exclusively by Google Antigravity CLI.
 Your sandbox is strictly read-only.
 Inspect the disposable, read-only Git mirror at: $plannerWs
@@ -1080,7 +1196,7 @@ You must output ONLY a valid JSON object matching the following schema (no markd
 
 @"
 ROLE CONTRACT:
-You are the dedicated GPT-5.6 Sol correction planner and architect for canonical workspace: $physicalWs. Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
+You are the dedicated Sol correction planner and architect for canonical workspace: $physicalWs ($plannerModelDesc). Use the reasoning effort inherited from the user's current Codex configuration; do not require or claim a fixed effort tier.
 You MUST NOT implement code directly. All code edits are performed exclusively by Google Antigravity CLI.
 Your sandbox is strictly read-only.
 Inspect the disposable, read-only Git mirror at: $plannerWs
@@ -1159,8 +1275,10 @@ You must output ONLY a valid JSON object matching the following schema (no markd
             $pinfo.WorkingDirectory = $plannerWs
 
             $pinfo.ArgumentList.Add("exec")
-            $pinfo.ArgumentList.Add("-m")
-            $pinfo.ArgumentList.Add("gpt-5.6-sol")
+            if (-not [string]::IsNullOrWhiteSpace($effectiveCodexModel)) {
+                $pinfo.ArgumentList.Add("-m")
+                $pinfo.ArgumentList.Add($effectiveCodexModel)
+            }
             $pinfo.ArgumentList.Add("-s")
             $pinfo.ArgumentList.Add("read-only")
             $pinfo.ArgumentList.Add("--ephemeral")
@@ -1488,6 +1606,7 @@ $constraintsMd
 - No fallback models or alternate execution providers.
 - Focus strictly on owned files and incremental fixes; do not crawl or re-index the broader repository.
 - Micro-verification only: do not run entire test suites or full regression suites; test only the specific changes or leaf tests relevant to owned files.
+- In your final response under 'VERIFIED:', explicitly record each verification command run and its numeric exit code (e.g., "(exit code 0)").
 
 VERIFICATION
 $verCommandsMd
@@ -1533,7 +1652,7 @@ $verCommandsMd
         if ($iteration -gt 1) {
             $implArgs.Add("-SkipGenerationPreflight")
         }
-        if ($DangerouslySkipPermissions) {
+        if ($effectiveSkipPermissions) {
             $implArgs.Add("-DangerouslySkipPermissions")
         }
         if ($effectiveTestMode) {
@@ -1651,6 +1770,9 @@ $verCommandsMd
         $unownedMods = [System.Collections.Generic.List[string]]::new()
         foreach ($cf in $windowDeltaFiles) {
             $normCf = $cf.Replace("\", "/").TrimStart('/')
+            if (Test-IsIgnoredRuntimeCachePath $normCf) {
+                continue
+            }
             $isOwned = $false
             foreach ($of in $planObj.owned_files) {
                 $normOf = ([string]$of).Replace("\", "/").TrimStart('/')
@@ -1834,6 +1956,14 @@ $verCommandsMd
         $revArgs.Add($reviewOutPath)
         $revArgs.Add("-Timeout")
         $revArgs.Add($revTimeoutStr)
+        if (-not [string]::IsNullOrWhiteSpace($effectiveCodexModel)) {
+            $revArgs.Add("-Model")
+            $revArgs.Add($effectiveCodexModel)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($effectiveReasoningEffort)) {
+            $revArgs.Add("-ReasoningEffort")
+            $revArgs.Add($effectiveReasoningEffort)
+        }
         if ($effectiveTestMode) {
             $revArgs.Add("-TestMode")
             if (-not [string]::IsNullOrWhiteSpace($TestCodexBin)) {
@@ -1921,8 +2051,9 @@ $verCommandsMd
                 Fail "Unknown key '$($prop.Name)' in reviewer object (strict schema validation)."
             }
         }
-        if ($reviewData.reviewer.model_requested -ne "gpt-5.6-sol" -or $reviewData.reviewer.effort_requested -ne "inherited" -or $reviewData.reviewer.sandbox_mode_requested -ne "read-only") {
-            Fail "review-evidence.json reviewer pins mismatch."
+        $expectedReviewerModel = if (-not [string]::IsNullOrWhiteSpace($effectiveCodexModel)) { $effectiveCodexModel } else { "inherited" }
+        if ($reviewData.reviewer.model_requested -ne $expectedReviewerModel -or $reviewData.reviewer.effort_requested -ne "inherited" -or $reviewData.reviewer.sandbox_mode_requested -ne "read-only") {
+            Fail "review-evidence.json reviewer pins mismatch (expected model '$expectedReviewerModel', got '$($reviewData.reviewer.model_requested)')."
         }
         $revObjElem = $reviewDoc.RootElement.GetProperty("reviewer")
         foreach ($name in @("model_requested", "effort_requested", "sandbox_mode_requested")) { if ($revObjElem.GetProperty($name).ValueKind -ne [System.Text.Json.JsonValueKind]::String) { Fail "review-evidence.json reviewer.$name must be string." } }

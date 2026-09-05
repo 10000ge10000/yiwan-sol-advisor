@@ -35,13 +35,24 @@ param(
     [switch]$TestMode,
 
     [Parameter(Mandatory = $false)]
-    [string]$TestCodexBin = ""
+    [string]$TestCodexBin = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$Model = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$ReasoningEffort = ""
 )
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     [Console]::Error.WriteLine("ERROR: PowerShell 7+ (pwsh) is required; detected PowerShell version $($PSVersionTable.PSVersion)")
     exit 1
 }
+
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+} catch {}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -51,17 +62,51 @@ function Fail([string]$Msg) {
     exit 1
 }
 
-function Get-CurrentCodexReasoningEffort {
+function Get-CurrentCodexConfig {
+    $result = @{
+        Model = $null
+        ReasoningEffort = $null
+    }
     $codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { Join-Path $env:USERPROFILE ".codex" } else { $env:CODEX_HOME }
     $configPath = Join-Path $codexHome "config.toml"
-    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $null }
-    $configText = [System.IO.File]::ReadAllText($configPath, [System.Text.UTF8Encoding]::new($false, $true))
-    $match = [regex]::Match($configText, '(?m)^\s*model_reasoning_effort\s*=\s*"(none|minimal|low|medium|high|xhigh|max|ultra)"\s*$')
-    if (-not $match.Success) { return $null }
-    return $match.Groups[1].Value
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $result }
+    try {
+        $configText = [System.IO.File]::ReadAllText($configPath, [System.Text.UTF8Encoding]::new($false, $true))
+        $matchModel = [regex]::Match($configText, '(?m)^\s*model\s*=\s*"([^"]+)"')
+        if ($matchModel.Success) {
+            $result.Model = $matchModel.Groups[1].Value.Trim()
+        }
+        $matchEffort = [regex]::Match($configText, '(?m)^\s*model_reasoning_effort\s*=\s*"([^"]+)"')
+        if ($matchEffort.Success) {
+            $result.ReasoningEffort = $matchEffort.Groups[1].Value.Trim()
+        }
+    } catch {
+        # ignore read errors, return whatever was found
+    }
+    return $result
 }
 
-$inheritedReasoningEffort = Get-CurrentCodexReasoningEffort
+$inheritedCodexConfig = Get-CurrentCodexConfig
+$effectiveModel = if (-not [string]::IsNullOrWhiteSpace($Model)) {
+    $Model.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($env:SOL_ADVISOR_MODEL)) {
+    $env:SOL_ADVISOR_MODEL.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_MODEL)) {
+    $env:CODEX_MODEL.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($inheritedCodexConfig.Model)) {
+    $inheritedCodexConfig.Model
+} else {
+    $null
+}
+
+$effectiveReasoningEffort = if (-not [string]::IsNullOrWhiteSpace($ReasoningEffort)) {
+    $ReasoningEffort.Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($inheritedCodexConfig.ReasoningEffort)) {
+    $inheritedCodexConfig.ReasoningEffort
+} else {
+    $null
+}
+$inheritedReasoningEffort = $effectiveReasoningEffort
 
 function Parse-Duration([string]$d) {
     if ([string]::IsNullOrWhiteSpace($d)) {
@@ -616,8 +661,8 @@ foreach ($prop in $implEvidenceObj.invocation.PSObject.Properties) {
 if ($implEvidenceObj.invocation.provider -ne "google-antigravity-cli") {
     Fail "EvidenceFile invocation.provider must be 'google-antigravity-cli'."
 }
-if ($implEvidenceObj.invocation.model_requested -ne "gemini-3.8-flash-high") {
-    Fail "EvidenceFile invocation.model_requested must be 'gemini-3.8-flash-high'."
+if ([string]::IsNullOrWhiteSpace($implEvidenceObj.invocation.model_requested)) {
+    Fail "EvidenceFile invocation.model_requested must not be empty."
 }
 if ($implEvidenceObj.invocation.effort_requested -ne "high" -or $implEvidenceObj.invocation.mode_requested -ne "accept-edits" -or $implEvidenceObj.invocation.output_format_requested -ne "json") {
     Fail "EvidenceFile invocation pins mismatch."
@@ -786,6 +831,21 @@ function Get-ScopedGitMetadataDigest([string]$WsPath, [bool]$IncludeIndex = $tru
     return $metaHash
 }
 
+# Universal runtime cache and compilation artifact filter
+function Test-IsIgnoredRuntimeCachePath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $norm = $Path.Replace("\", "/").Trim('/')
+    # Python runtime bytecode & cache directories
+    if ($norm -match '(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.coverage|\.tox|\.nox)(/|$)') { return $true }
+    if ($norm -match '\.(pyc|pyo|pyd)$') { return $true }
+    # Node.js / packaging caches
+    if ($norm -match '(^|/)(node_modules/\.cache|\.npm|\.yarn/cache)(/|$)') { return $true }
+    # Editor & OS temporary artifacts
+    if ($norm -match '(^|/)(\.DS_Store|Thumbs\.db|\.directory)$') { return $true }
+    if ($norm -match '\.(tmp|swp|bak)$' -or $norm -match '(^|/)\.~') { return $true }
+    return $false
+}
+
 # 8. Compute Deterministic Repository Manifest
 function Get-DeterministicRepoManifest([string]$WsPath) {
     $ms = [System.IO.MemoryStream]::new()
@@ -825,6 +885,8 @@ function Get-DeterministicRepoManifest([string]$WsPath) {
         $uList = $untrackedRaw.Split([char]0, [System.StringSplitOptions]::RemoveEmptyEntries)
         [System.Array]::Sort($uList, [System.StringComparer]::Ordinal)
         foreach ($uf in $uList) {
+            $normUf = $uf.Replace("\", "/").TrimStart('/')
+            if (Test-IsIgnoredRuntimeCachePath $normUf) { continue }
             $fullPath = [System.IO.Path]::Combine($WsPath, $uf)
             if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
                 $fInfo = Get-FileSha256AndLength $fullPath
@@ -891,6 +953,8 @@ if (-not [string]::IsNullOrEmpty($untrackedRaw)) {
     $sb = [System.Text.StringBuilder]::new()
     $untrackedList = $untrackedRaw.Split([char]0, [System.StringSplitOptions]::RemoveEmptyEntries)
     foreach ($untracked in $untrackedList) {
+        $normUntracked = $untracked.Replace("\", "/").TrimStart('/')
+        if (Test-IsIgnoredRuntimeCachePath $normUntracked) { continue }
         $fullPath = [System.IO.Path]::Combine($physicalWs, $untracked)
         if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
             $fInfo = Get-FileSha256AndLength $fullPath
@@ -957,9 +1021,11 @@ $bindingsSummary = @"
 "@
 
 # 10. Construct Review Prompt
+$reviewerModelDesc = if (-not [string]::IsNullOrWhiteSpace($effectiveModel)) { "model: $effectiveModel" } else { "inherited Codex model" }
+$reviewerEffortDesc = if (-not [string]::IsNullOrWhiteSpace($effectiveReasoningEffort)) { $effectiveReasoningEffort } else { "inherited" }
 $reviewPrompt = @"
 ROLE
-You are a fresh, ephemeral, read-only final reviewer (gpt-5.6-sol with the reasoning effort inherited from the user's current Codex configuration).
+You are a fresh, ephemeral, read-only final reviewer ($reviewerModelDesc with reasoning effort: $reviewerEffortDesc).
 You MUST remain strictly read-only: do not create, modify, delete, format, or implement files.
 Inspect the stated goal, staged & unstaged diffs relative to HEAD, untracked files, implementer evidence, and parent verification evidence in a fresh context.
 The canonical repository is intentionally not mounted as your working directory. Review only the complete evidence bundle supplied below; do not attempt to locate or access the canonical workspace.
@@ -989,6 +1055,7 @@ $bindingsSummary
 
 REVIEW INSTRUCTIONS
 Judge correctness, completeness, regressions, scope discipline, interface preservation, and test adequacy.
+When parent verification reports all_checks_passed: true and no dedicated parent verification script was supplied, evaluate code correctness, logic, and test coverage through rigorous inspection of the diffs, untracked files, and test suites. Do not reject with FIX-FIRST solely because implementer-reported execution is marked untrusted or because suggested commands were left unexecuted by the parent machine, unless you identify concrete code bugs, test defects, or unmet requirements.
 If no changes were needed or made to satisfy the goal, indicate reviewed_no_change: true.
 You MUST echo all 9 reviewed_bindings exactly as provided above.
 Return ONLY a structured JSON object with the following schema:
@@ -1076,8 +1143,10 @@ try {
     $pinfo.WorkingDirectory = $reviewExecutionRoot
 
     $pinfo.ArgumentList.Add("exec")
-    $pinfo.ArgumentList.Add("-m")
-    $pinfo.ArgumentList.Add("gpt-5.6-sol")
+    if (-not [string]::IsNullOrWhiteSpace($effectiveModel)) {
+        $pinfo.ArgumentList.Add("-m")
+        $pinfo.ArgumentList.Add($effectiveModel)
+    }
     $pinfo.ArgumentList.Add("-s")
     $pinfo.ArgumentList.Add("read-only")
     $pinfo.ArgumentList.Add("--ephemeral")
@@ -1277,7 +1346,7 @@ foreach ($bk in $requiredBindingKeys) {
 $envelope = [ordered]@{
     schema_version = 1
     reviewer = [ordered]@{
-        model_requested = "gpt-5.6-sol"
+        model_requested = if (-not [string]::IsNullOrWhiteSpace($effectiveModel)) { $effectiveModel } else { "inherited" }
         effort_requested = "inherited"
         sandbox_mode_requested = "read-only"
         ephemeral = $true

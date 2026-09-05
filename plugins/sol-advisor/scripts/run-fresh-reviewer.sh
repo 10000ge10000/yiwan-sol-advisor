@@ -23,6 +23,8 @@ review_output_file=""
 timeout="15m"
 test_mode=0
 test_codex_bin=""
+model=""
+reasoning_effort=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -54,6 +56,16 @@ while [ $# -gt 0 ]; do
     --timeout)
       [ $# -ge 2 ] || fail "Missing value for --timeout"
       timeout="$2"
+      shift 2
+      ;;
+    --model)
+      [ $# -ge 2 ] || fail "Missing value for --model"
+      model="$2"
+      shift 2
+      ;;
+    --reasoning-effort)
+      [ $# -ge 2 ] || fail "Missing value for --reasoning-effort"
+      reasoning_effort="$2"
       shift 2
       ;;
     --test-mode)
@@ -264,12 +276,37 @@ trap clean_temp EXIT INT TERM
   "$temp_prompt_file" \
   "$temp_msg_file" \
   "$timeout_sec" \
-  "$timeout" <<'PY'
-import sys, os, subprocess, json, hashlib, signal, secrets, stat, time
+  "$timeout" \
+  "$model" \
+  "$reasoning_effort" <<'PY'
+import sys, os, subprocess, json, hashlib, signal, secrets, stat, time, re
 
 (ws, goal_file, evidence_file, parent_ver_file, review_output_file,
  out_parent, codex_bin, temp_prompt_file, temp_msg_file,
- timeout_sec_str, timeout_str) = sys.argv[1:12]
+ timeout_sec_str, timeout_str, model_arg, effort_arg) = sys.argv[1:14]
+
+def get_current_codex_config():
+    codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    cfg_path = os.path.join(codex_home, "config.toml")
+    res = {"model": None, "effort": None}
+    if not os.path.isfile(cfg_path):
+        return res
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        m_model = re.search(r'(?m)^\s*model\s*=\s*"([^"]+)"', text)
+        if m_model:
+            res["model"] = m_model.group(1).strip()
+        m_effort = re.search(r'(?m)^\s*model_reasoning_effort\s*=\s*"([^"]+)"', text)
+        if m_effort:
+            res["effort"] = m_effort.group(1).strip()
+    except Exception:
+        pass
+    return res
+
+inherited_codex_cfg = get_current_codex_config()
+effective_model = model_arg.strip() if model_arg.strip() else (os.environ.get("SOL_ADVISOR_MODEL") or os.environ.get("CODEX_MODEL") or inherited_codex_cfg.get("model"))
+effective_reasoning_effort = effort_arg.strip() if effort_arg.strip() else inherited_codex_cfg.get("effort")
 
 timeout_sec = int(timeout_sec_str)
 start_time = time.time()
@@ -597,6 +634,23 @@ def get_scoped_git_metadata_digest(include_index=True):
 
     return h.hexdigest()
 
+# Universal runtime cache and compilation artifact filter
+def is_ignored_runtime_cache_path(path_str):
+    if not path_str:
+        return False
+    norm = path_str.replace('\\', '/').strip('/')
+    if re.search(r'(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.coverage|\.tox|\.nox)(/|$)', norm):
+        return True
+    if re.search(r'\.(pyc|pyo|pyd)$', norm):
+        return True
+    if re.search(r'(^|/)(node_modules/\.cache|\.npm|\.yarn/cache)(/|$)', norm):
+        return True
+    if re.search(r'(^|/)(\.DS_Store|Thumbs\.db|\.directory)$', norm):
+        return True
+    if re.search(r'\.(tmp|swp|bak)$', norm) or re.search(r'(^|/)\.~', norm):
+        return True
+    return False
+
 # 5.3 Deterministic Repository Manifest Function
 def get_deterministic_repo_manifest():
     h = hashlib.sha256()
@@ -623,6 +677,9 @@ def get_deterministic_repo_manifest():
     untracked_files.sort()
     h.update(b"UNTRACKED_FILES:\n")
     for uf in untracked_files:
+        uf_str = uf.decode('utf-8', errors='replace').replace('\\', '/').lstrip('/')
+        if is_ignored_runtime_cache_path(uf_str):
+            continue
         fp = os.path.join(ws.encode('utf-8'), uf)
         if os.path.isfile(fp):
             f_len, f_hash = get_file_sha256_and_len(fp.decode('utf-8', errors='replace'))
@@ -672,6 +729,8 @@ for uf_bytes in untracked_list:
     except UnicodeDecodeError:
         sys.stderr.write("ERROR: Non-UTF-8 Git path rejected fail-closed during fresh review.\n")
         sys.exit(1)
+    if is_ignored_runtime_cache_path(uf.replace('\\', '/').lstrip('/')):
+        continue
     full_path = os.path.join(ws, uf)
     if os.path.isfile(full_path):
         f_len, f_hash = get_file_sha256_and_len(full_path)
@@ -718,8 +777,10 @@ bindings_summary = f"""- task_sha256: {task_hash}
 - aggregate_delta_manifest_sha256: {agg_delta_hash}"""
 
 # 5.5 Review Prompt
+reviewer_model_desc = f"model: {effective_model}" if effective_model else "inherited Codex model"
+reviewer_effort_desc = effective_reasoning_effort if effective_reasoning_effort else "inherited"
 review_prompt = f"""ROLE
-You are a fresh, ephemeral, read-only final reviewer (gpt-5.6-sol with the reasoning effort inherited from the user's current Codex configuration).
+You are a fresh, ephemeral, read-only final reviewer ({reviewer_model_desc} with reasoning effort: {reviewer_effort_desc}).
 You MUST remain strictly read-only: do not create, modify, delete, format, or implement files.
 Inspect the stated goal, staged & unstaged diffs relative to HEAD, untracked files, implementer evidence, and parent verification evidence in a fresh context.
 Note: Ignored files (.gitignore) are excluded from integrity scope; tracked and non-ignored files are strictly verified.
@@ -748,6 +809,7 @@ CRYPTOGRAPHIC BINDINGS
 
 REVIEW INSTRUCTIONS
 Judge correctness, completeness, regressions, scope discipline, interface preservation, and test adequacy.
+When parent verification reports all_checks_passed: true and no dedicated parent verification script was supplied, evaluate code correctness, logic, and test coverage through rigorous inspection of the diffs, untracked files, and test suites. Do not reject with FIX-FIRST solely because implementer-reported execution is marked untrusted or because suggested commands were left unexecuted by the parent machine, unless you identify concrete code bugs, test defects, or unmet requirements.
 If no changes were needed or made to satisfy the goal, indicate reviewed_no_change: true.
 You MUST echo all 9 reviewed_bindings exactly as provided above.
 Return ONLY a structured JSON object with the following schema:
@@ -781,14 +843,25 @@ with open(temp_prompt_file, 'wb') as f:
 
 # 5.6 Execute Codex Subprocess
 codex_cmd = [
-    codex_bin, "exec",
-    "-m", "gpt-5.6-sol",
+    codex_bin, "exec"
+]
+if effective_model:
+    codex_cmd.extend(["-m", effective_model])
+codex_cmd.extend([
     "-s", "read-only",
     "--ephemeral",
+    "--ignore-user-config"
+])
+if effective_reasoning_effort:
+    codex_cmd.extend(["-c", f'model_reasoning_effort="{effective_reasoning_effort}"'])
+for feat in ("apps", "plugins", "remote_plugin", "recommended_plugins", "browser_use", "browser_use_external", "computer_use", "in_app_browser", "memories", "image_generation", "workspace_dependencies", "skill_search"):
+    codex_cmd.extend(["--disable", feat])
+codex_cmd.extend([
     "-C", ws,
+    "--skip-git-repo-check",
     "--color", "never",
     "-o", temp_msg_file
-]
+])
 
 rem_codex_sec = int(timeout_sec - (time.time() - start_time))
 if rem_codex_sec <= 0:
@@ -935,7 +1008,7 @@ for bk in required_binding_keys:
 envelope = {
     "schema_version": 1,
     "reviewer": {
-        "model_requested": "gpt-5.6-sol",
+        "model_requested": effective_model if effective_model else "inherited",
         "effort_requested": "inherited",
         "sandbox_mode_requested": "read-only",
         "ephemeral": True,

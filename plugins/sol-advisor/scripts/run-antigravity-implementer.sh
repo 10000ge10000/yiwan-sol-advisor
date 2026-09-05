@@ -19,6 +19,7 @@ dangerously_skip_permissions=0
 skip_generation_preflight=0
 test_mode=0
 test_agy_exe=''
+model="${AGY_MODEL:-gemini-3.8-flash-high}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -57,6 +58,11 @@ while [ "$#" -gt 0 ]; do
       heartbeat_interval=$2
       shift 2
       ;;
+    --model)
+      [ "$#" -ge 2 ] || fail "--model requires a model name."
+      model=$2
+      shift 2
+      ;;
     --dangerously-skip-permissions)
       dangerously_skip_permissions=1
       shift
@@ -75,7 +81,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --help|-h)
-      printf '%s\n' "Usage: run-antigravity-implementer.sh --workspace PATH --spec-file PATH --evidence-file PATH [--print-timeout DURATION] [--idle-timeout DURATION] [--generation-preflight-timeout DURATION] [--heartbeat-interval DURATION] [--dangerously-skip-permissions] [--skip-generation-preflight] [--test-mode] [--test-agy-exe PATH]"
+      printf '%s\n' "Usage: run-antigravity-implementer.sh --workspace PATH --spec-file PATH --evidence-file PATH [--print-timeout DURATION] [--idle-timeout DURATION] [--generation-preflight-timeout DURATION] [--heartbeat-interval DURATION] [--model MODEL] [--dangerously-skip-permissions] [--skip-generation-preflight] [--test-mode] [--test-agy-exe PATH]"
       exit 0
       ;;
     *)
@@ -372,7 +378,7 @@ PY
 
 prompt_header="ROLE CONTRACT:
 You are the sole implementation provider (Google Antigravity CLI).
-Sol (GPT-5.6 Sol using the user's current reasoning effort) is the architect and planner.
+Sol (using the active Codex model and reasoning effort) is the architect and planner.
 Do not redesign or redo architecture; stay within the owned files and follow the five-part specification below.
 Execute the implementation, perform verification, and return a structured report including: status, files changed, commands, verification outputs, warnings, and blockers.
 Never run git config --global or git config --system. The wrapper supplies repository trust only to this subprocess.
@@ -390,8 +396,12 @@ SPECIFICATION:
 "
 full_prompt="${prompt_header}${spec_content}"
 
-perm_mode="sandboxed-dangerously-skip-permissions"
-printf '%s\n' "PERMISSION MODE: Sandboxed DangerouslySkipPermissions enabled by Skill default for workspace $resolved_workspace" >&2
+if [ "$dangerously_skip_permissions" -eq 1 ]; then
+  perm_mode="dangerously-skip-permissions"
+  printf '%s\n' "PERMISSION MODE: sandboxed-dangerously-skip-permissions enabled for workspace $resolved_workspace" >&2
+else
+  perm_mode="standard"
+fi
 
 tmp_stdout=$(mktemp) || fail "could not create temporary file for stdout"
 tmp_stderr=$(mktemp) || fail "could not create temporary file for stderr"
@@ -409,7 +419,7 @@ start_seconds=$(date +%s 2>/dev/null || printf '0')
 tmp_ver_file=$(mktemp) || fail "could not create temporary file for version"
 
 set +e
-"$py_bin" - "$agy_bin" "$resolved_workspace" "$print_timeout" "$tmp_prompt" "$dangerously_skip_permissions" "$tmp_stdout" "$tmp_stderr" "$timeout_sec" "$idle_timeout_sec" "$preflight_timeout_sec" "$heartbeat_interval_sec" "$tmp_ver_file" "$resolved_spec_file" "$skip_generation_preflight" <<'PY'
+"$py_bin" - "$agy_bin" "$resolved_workspace" "$print_timeout" "$tmp_prompt" "$dangerously_skip_permissions" "$tmp_stdout" "$tmp_stderr" "$timeout_sec" "$idle_timeout_sec" "$preflight_timeout_sec" "$heartbeat_interval_sec" "$tmp_ver_file" "$resolved_spec_file" "$skip_generation_preflight" "$model" <<'PY'
 import datetime
 import json
 import os
@@ -430,6 +440,7 @@ preflight_timeout_sec = int(sys.argv[10])
 heartbeat_interval_sec = int(sys.argv[11])
 version_file, spec_file = sys.argv[12:14]
 skip_generation_preflight = sys.argv[14] == "1"
+model_requested = sys.argv[15].strip() if len(sys.argv) > 15 and sys.argv[15].strip() else "gemini-3.8-flash-high"
 started = time.monotonic()
 
 def remaining(label):
@@ -503,8 +514,8 @@ def bounded_run(args, cwd, timeout, label):
 try:
     models_out, _ = bounded_run([agy_bin, "models"], workspace, 30, "agy models")
     models = [line.split()[0] for line in models_out.splitlines() if line.strip()]
-    if "gemini-3.8-flash-high" not in models:
-        raise RuntimeError("required model 'gemini-3.8-flash-high' is absent from agy models")
+    if model_requested not in models:
+        raise RuntimeError(f"required model '{model_requested}' is absent from agy models")
     version_out, _ = bounded_run([agy_bin, "--version"], workspace, 30, "agy --version")
     version_out = version_out.strip()
     if not version_out:
@@ -520,7 +531,7 @@ try:
         with tempfile.TemporaryDirectory(prefix="sol-advisor-preflight-") as preflight_dir:
             preflight_prompt = f"Return only one JSON object with status=ok and nonce={nonce}. Do not create or modify files."
             preflight_args = [
-                agy_bin, "--sandbox", "--model", "gemini-3.8-flash-high",
+                agy_bin, "--sandbox", "--model", model_requested,
                 "--effort", "high", "--mode", "accept-edits", "--output-format", "json",
                 "--print-timeout", f"{preflight_timeout_sec}s", "--dangerously-skip-permissions",
                 "--print", preflight_prompt,
@@ -602,10 +613,13 @@ def process_tree_cpu(pid):
     return read_one(pid)
 
 cmd = [
-    agy_bin, "--new-project", "--sandbox", "--model", "gemini-3.8-flash-high",
+    agy_bin, "--new-project", "--add-dir", workspace, "--sandbox", "--model", model_requested,
     "--effort", "high", "--mode", "accept-edits", "--output-format", "json",
-    "--print-timeout", print_timeout, "--dangerously-skip-permissions", "--print", prompt,
+    "--print-timeout", print_timeout,
 ]
+if danger_flag:
+    cmd.append("--dangerously-skip-permissions")
+cmd.extend(["--print", prompt])
 
 state = {"last_activity": time.monotonic(), "kind": "startup", "out": 0, "err": 0}
 state_lock = threading.Lock()
@@ -735,7 +749,7 @@ fi
 # 8. Build, validate response contract, and atomically publish evidence envelope
 build_envelope_python() {
   py_runner=$1
-  "$py_runner" - "$tmp_stdout" "$resolved_evidence_file" "$cli_version" "$resolved_workspace" "$perm_mode" "$started_at_utc" "$ended_at_utc" "$duration_ms" "$exit_code" "$effective_test_mode" <<'PY'
+  "$py_runner" - "$tmp_stdout" "$resolved_evidence_file" "$cli_version" "$resolved_workspace" "$perm_mode" "$started_at_utc" "$ended_at_utc" "$duration_ms" "$exit_code" "$effective_test_mode" "$model" <<'PY'
 import json, sys, os, stat, re, secrets
 
 raw_file = sys.argv[1]
@@ -748,6 +762,7 @@ end_utc = sys.argv[7]
 dur_ms = int(sys.argv[8])
 exit_code = int(sys.argv[9])
 test_mode_flag = sys.argv[10] == "1"
+model_requested = sys.argv[11].strip() if len(sys.argv) > 11 and sys.argv[11].strip() else "gemini-3.8-flash-high"
 
 target_parent = os.path.dirname(target_file)
 target_filename = os.path.basename(target_file)
@@ -830,8 +845,8 @@ try:
     mode_obs = "mode" in agy_res
     cwd_obs_field = "cwd" in agy_res or "working_directory" in agy_res
 
-    if model_obs and agy_res["model"] != "gemini-3.8-flash-high":
-        sys.stderr.write(f"ERROR: Observed agy_result model {agy_res['model']!r} does not match requested pin 'gemini-3.8-flash-high'\n")
+    if model_obs and agy_res["model"] != model_requested:
+        sys.stderr.write(f"ERROR: Observed agy_result model {agy_res['model']!r} does not match requested pin {model_requested!r}\n")
         sys.exit(1)
 
     if "effort" in agy_res and agy_res["effort"] != "high":
@@ -942,10 +957,10 @@ try:
             sys.exit(1)
 
     has_exit_code = bool(
-        re.search(r'(?i)\b(?:exit(?:ed)?(?:\s+with)?(?:\s+(?:code|status))?|return\s+code|code|status)\s*[:=]?\s*\d+\b', verified_str) or
+        re.search(r'(?i)\b(?:exit(?:ed)?(?:\s+with)?(?:[_\s]*(?:code|status))?|return[_\s]*code|status[_\s]*code|code|status|rc)\s*[:=]?\s*\d+\b', verified_str) or
         re.search(r'(?:退出码|返回码|退出代码|返回代码)\s*[:：=]?\s*`?\d+`?', verified_str) or
         re.search(r'(?i)\bexit\s+\d+\b', verified_str) or
-        re.search(r'(?i)\(exit\s*(?:code)?\s*[:=]?\s*\d+\)', verified_str)
+        re.search(r'(?i)[\(\[]exit\s*(?:code)?\s*[:=]?\s*\d+[\]\)]', verified_str)
     )
 
     has_cmd = False
@@ -970,7 +985,7 @@ try:
         "invocation": {
             "provider": "google-antigravity-cli",
             "cli_version_observed": cli_ver,
-            "model_requested": "gemini-3.8-flash-high",
+            "model_requested": model_requested,
             "model_catalog_exact_match_observed": True,
             "effort_requested": "high",
             "mode_requested": "accept-edits",

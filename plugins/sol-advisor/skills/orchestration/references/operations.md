@@ -72,14 +72,14 @@ sh .codex/skills/yiwan-sol-advisor/scripts/launch-sol-advisor.sh \
 - `-Workspace` / `--workspace`: Absolute path to target Git top-level repository.
 - `-TaskFile` / `--task-file`: Absolute path to a UTF-8 markdown or text file (<= 1MB) describing the task outside the workspace.
 - `-ResultFile` / `--result-file`: Absolute path outside the workspace where final report is published (fails if file already exists).
-- `-Timeout` / `--timeout`: Hard orchestration deadline (default: `75m`). One iteration reserves planner `15m`, implementer `25m`, reviewer `15m`, and machine checks `2m`; a shorter total fails before planning or writing. Each stage is capped independently instead of inheriting the full remaining deadline. The launcher emits a structured planner heartbeat every 30 seconds by default (`-PlannerHeartbeatInterval` / `--planner-heartbeat-interval`) so a long Sol analysis is observable.
+- `-Timeout` / `--timeout`: Hard orchestration deadline. One iteration default budget covers planner `6m`, implementer `15m`, reviewer `8m`, and machine reserve `2m`. When `-Timeout` is smaller than the default phase sum (e.g. `-Timeout 25m`) and phase budgets are not explicitly configured, the launcher dynamically scales planner (20%), implementer (50%), reviewer (25%), and machine reserve proportionally. If sub-stage budgets are explicitly specified and exceed the total timeout, the launcher fails closed before planning or writing.
 - `-PlannerIdleTimeout` / `--planner-idle-timeout`: Sol planner no-progress deadline (default: `2m`). Progress means stdout/stderr bytes, plan output file growth, or process-tree CPU activity. On timeout, the launcher terminates the process tree, dumps restricted diagnostics (`planner-stdout.log`, `planner-stderr.log`, `diagnostics.json`, partial plan), and fails closed.
-- `-IdleTimeout` / `--idle-timeout`: Implementer no-progress deadline (default: `8m`). Progress means stdout/stderr bytes, declared-worktree changes, or process-tree CPU growth. Network connectivity alone is not progress.
-- `-GenerationPreflightTimeout` / `--generation-preflight-timeout`: Disposable exact-model generation probe (default: `90s`) performed before the implementation window. Executed on iteration 1; subsequent correction iterations pass `-SkipGenerationPreflight` / `--skip-generation-preflight` to save execution time.
+- `-IdleTimeout` / `--idle-timeout`: Implementer no-progress deadline (default: `4m`). Progress means stdout/stderr bytes, declared-worktree changes, or process-tree CPU growth. Network connectivity alone is not progress.
+- `-GenerationPreflightTimeout` / `--generation-preflight-timeout`: Disposable exact-model generation probe (default: `60s`) performed before the implementation window. Executed on iteration 1; subsequent correction iterations pass `-SkipGenerationPreflight` / `--skip-generation-preflight` to save execution time.
 - `Stage Duration Telemetry`: The launcher collects precise per-stage execution times across all iterations (Planner, Implementer, Parent Verify, Reviewer), emits a structured `SOL_ADVISOR_TELEMETRY` JSON event on stderr, prints an ASCII waterfall table to stdout, and writes `telemetry.json` into the private run directory.
-- `-MaxOwnedFiles` / `--max-owned-files` and `-MaxVerificationCommands` / `--max-verification-commands`: default `12`; oversized plans fail closed and should be split into phases.
-- `-MaxCorrections` / `--max-corrections`: Maximum number of fix-first correction iterations (default: `3`).
-- `-DangerouslySkipPermissions` / `--dangerously-skip-permissions`: Backward-compatible launcher option. The implementer now enables the AGY bypass by default for every Skill run.
+- `-MaxOwnedFiles` / `--max-owned-files` and `-MaxVerificationCommands` / `--max-verification-commands`: default `6` (max 50); oversized plans fail closed and should be split into phases.
+- `-MaxCorrections` / `--max-corrections`: Maximum number of fix-first correction iterations (default: `1`).
+- `-DangerouslySkipPermissions` / `--dangerously-skip-permissions`: Enabled by default for headless implementer execution within the safety sandbox (protected by parent repository snapshot diffing, strict `owned_files` whitelist, and parent verification gate). Use `-EnforceInteractivePermissions` / `--enforce-interactive-permissions` to require interactive approval.
 - `-TestMode` / `--test-mode`: Explicit switch required to activate test overrides/fakes.
 - `-TestAgyExe` / `--test-agy-exe`: Executable path override for Antigravity CLI (requires `-TestMode`).
 - `-TestCodexBin` / `--test-codex-bin`: Executable path override for Codex binary (requires `-TestMode`).
@@ -134,7 +134,7 @@ sh .codex/skills/yiwan-sol-advisor/scripts/run-antigravity-implementer.sh \
 
 ## 3. Fresh Sol Reviewer Usage
 
-The fresh reviewer launches an ephemeral read-only `gpt-5.6-sol` / `max` Codex process to inspect diffs and parent verification evidence. On Windows it starts from an empty disposable execution root and reviews only the bounded evidence bundle; it does not mount the canonical dynamic worktree as its current directory.
+The fresh reviewer launches an ephemeral read-only Codex process (inheriting the active model such as `gpt-6-astra`, `gpt-5.6-sol`, or `gpt-5.5`, and configured reasoning effort) to inspect diffs and parent verification evidence. On Windows it starts from an empty disposable execution root and reviews only the bounded evidence bundle; it does not mount the canonical dynamic worktree as its current directory.
 
 ### Windows:
 ```powershell
@@ -144,6 +144,8 @@ pwsh .codex/skills/yiwan-sol-advisor/scripts/run-fresh-reviewer.ps1 `
   -EvidenceFile "C:\path\to\evidence.json" `
   -ParentVerificationFile "C:\path\to\parent-verification.json" `
   -ReviewOutputFile "C:\path\to\review.json" `
+  [-Model "gpt-6-astra"] `
+  [-ReasoningEffort "high"] `
   [-Timeout "15m"] `
   [-TestMode] `
   [-TestCodexBin "C:\path\to\mock_codex.exe"]
@@ -157,6 +159,8 @@ sh .codex/skills/yiwan-sol-advisor/scripts/run-fresh-reviewer.sh \
   --evidence-file /path/to/evidence.json \
   --parent-verification-file /path/to/parent-verification.json \
   --review-output-file /path/to/review.json \
+  [--model gpt-6-astra] \
+  [--reasoning-effort high] \
   [--timeout 15m] \
   [--test-mode] \
   [--test-codex-bin /path/to/mock_codex]
@@ -167,7 +171,7 @@ sh .codex/skills/yiwan-sol-advisor/scripts/run-fresh-reviewer.sh \
 - Supplies staged diff (`git diff --cached --binary`) and unstaged diff (`git diff --binary`) separately within fail-closed limits (total diff <= 2MB, untracked text <= 1MB).
 - Requires independent parent verification artifact as input with strict schema version 1 verification.
 - Strictly binds and echoes all 9 cryptographic digests (`task_sha256`, `plan_sha256`, `spec_sha256`, `implementer_evidence_sha256`, `parent_verification_sha256`, `pre_window_manifest_sha256`, `post_window_manifest_sha256`, `repository_manifest_sha256`, `aggregate_delta_manifest_sha256`).
-- Executes `codex exec` with `-m gpt-5.6-sol -s read-only --ephemeral`; it intentionally omits a `model_reasoning_effort` override so the user's current Codex configuration selects the tier.
+- Executes `codex exec` with `-m <model> -s read-only --ephemeral`; it dynamically detects and inherits the active model (such as `gpt-6-astra`, `gpt-5.6-sol`, or `gpt-5.5`) and reasoning effort from the user's Codex configuration (`~/.codex/config.toml`) while supporting explicit `-Model` / `--model` and `-ReasoningEffort` / `--reasoning-effort` overrides.
 - For independent acceptance evidence on Windows, pass `-TrustedVerificationScript <absolute-path-outside-workspace>`. The caller owns and audits this script; planner suggestions are never promoted to trusted commands automatically. The launcher records stdout, stderr, SHA-256, and the observed exit code, and fails if the verifier mutates the repository.
 - On Windows, the planner inspects a disposable local Git mirror populated with the canonical tracked and non-ignored working-tree view. This avoids `CreateProcessWithLogonW failed: 267` / access-denied failures caused by restricted AppContainer traversal of dynamic worktrees without weakening the Sol sandbox.
 - If Codex reports an account usage limit, orchestration stops with a concise no-fallback diagnostic. Wait for the stated reset; do not substitute another planner/reviewer model.
