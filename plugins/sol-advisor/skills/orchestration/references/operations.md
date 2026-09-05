@@ -1,193 +1,217 @@
-# Native operations
+# Operations and Operational Guide
 
-This is the maintainer and operator reference for Sol Advisor's native custom-agent
-workflow. Keep the README user-facing; use this page when installing, delegating,
-inspecting routing, or validating a release.
+This document describes the operational procedures, commands, preflight checks, test mode flags, and safety guarantees for `yiwan-sol-advisor`.
 
-## Role pins and spawn contract
+## 0. Distribution Setup
 
-The installed TOMLs are the source of truth:
+After Skill Installer or `git clone` places the repository in the user-level Skill directory, run the platform setup helper.
 
-| Role type | Model | Effort | Use |
-|---|---|---|---|
-| sol_advisor_luna_implementer | gpt-5.6-luna | max | Delegate/full bounded routine implementation |
-| sol_advisor_terra_implementer | gpt-5.6-terra | high | Delegate/full judgment-heavy or high-risk implementation |
-| sol_advisor_sol_reviewer | gpt-5.6-sol | high | Audit/full fresh review; requests read-only sandbox |
+Windows:
 
-Native spawn requests name the role and use a fresh context:
+```powershell
+pwsh -NoProfile -File .\scripts\setup-yiwan-sol-advisor.ps1
+```
 
-~~~text
-agent_type: sol_advisor_luna_implementer
-fork_turns: none
-~~~
+POSIX / Linux / macOS / WSL:
 
-Use the Terra type only when the selected delegate or full route needs it:
+```sh
+sh ./scripts/setup-yiwan-sol-advisor.sh
+```
 
-~~~text
-agent_type: sol_advisor_terra_implementer
-fork_turns: none
-~~~
+Both helpers verify Codex, Git, Python, `agy`, and the required `gemini-3.8-flash-high` model. If `agy` is missing, they prefer Google's official online installer. When that download fails, pass a user-supplied official release archive and its independently recorded SHA-256:
 
-Use a fresh Sol reviewer only for audit or full after parent verification:
+After authentication, setup backs up an existing `~/.gemini/antigravity-cli/settings.json`, configures `toolPermission` as `proceed-in-sandbox` and `enableTerminalSandbox` as `true`, then runs a real `agy --sandbox` headless command smoke test. `--check-only` validates this state without changing it. This is a user-level Antigravity preference and also affects other AGY sessions for that user.
 
-~~~text
-agent_type: sol_advisor_sol_reviewer
-fork_turns: none
-~~~
+```powershell
+pwsh -NoProfile -File .\scripts\setup-yiwan-sol-advisor.ps1 `
+  -AgyOfflinePackage "D:\offline\agy_cli_windows_x64.zip" `
+  -AgyOfflineSha256 "<64-hex-sha256>"
+```
 
-Do not attach model or reasoning overrides. A missing, conflicting, unavailable, or
-unobservable role/model/effort is a hard stop; never substitute another role.
+```sh
+sh ./scripts/setup-yiwan-sol-advisor.sh \
+  --agy-offline-package /media/offline/agy_cli_linux_x64.tar.gz \
+  --agy-offline-sha256 '<64-hex-sha256>'
+```
 
-## Selective route declaration, preflight, and caching
+The repository does not redistribute Google binaries. Authentication remains interactive: the helper launches `agy` when needed, the user completes Google sign-in and terms acceptance, and the helper then rechecks model availability. Use `-CheckOnly` / `--check-only` for a read-only prerequisite audit or `-SkipLogin` / `--skip-login` when login must be completed later.
 
-The primary session must be Sol / High. Companion installation is separate from task
-routing because plugin installation does not register user-owned TOMLs.
+## 1. Launcher Usage
 
-At installation or update time, run the repository-relative installer and its exactness
-check:
+The launcher executes a machine-enforced state machine orchestrating Sol specification planning, Antigravity code implementation, parent verification, and fresh review.
 
-~~~sh
-sh plugins/sol-advisor/scripts/install-agents.sh
-sh plugins/sol-advisor/scripts/install-agents.sh --check
-~~~
+### Windows (PowerShell 7):
+```powershell
+pwsh .codex/skills/yiwan-sol-advisor/scripts/launch-sol-advisor.ps1 `
+  -Workspace "C:\path\to\repo" `
+  -TaskFile "C:\path\to\task.md" `
+  -ResultFile "C:\path\to\output\result.md" `
+    [-Timeout "75m"] `
+  [-MaxCorrections 3] `
+  [-DangerouslySkipPermissions] `
+  [-TestMode] `
+  [-TestAgyExe "C:\path\to\mock_agy.exe"] `
+  [-TestCodexBin "C:\path\to\mock_codex.exe"]
+```
 
-When operating from an installed skill, resolve the same script relative to this
-reference's parent skill:
+### POSIX / Linux / WSL (bash):
+```sh
+sh .codex/skills/yiwan-sol-advisor/scripts/launch-sol-advisor.sh \
+  --workspace /path/to/repo \
+  --task-file /path/to/task.md \
+  --result-file /path/to/output/result.md \
+    [--timeout 75m] \
+  [--max-corrections 3] \
+  [--dangerously-skip-permissions] \
+  [--test-mode] \
+  [--test-agy-exe /path/to/mock_agy] \
+  [--test-codex-bin /path/to/mock_codex]
+```
 
-~~~sh
-skill_dir=<directory-containing-this-SKILL.md>
-installer="$skill_dir/../../scripts/install-agents.sh"
-sh "$installer" --check
-~~~
+### Launcher Parameters:
+- `-Workspace` / `--workspace`: Absolute path to target Git top-level repository.
+- `-TaskFile` / `--task-file`: Absolute path to a UTF-8 markdown or text file (<= 1MB) describing the task outside the workspace.
+- `-ResultFile` / `--result-file`: Absolute path outside the workspace where final report is published (fails if file already exists).
+- `-Timeout` / `--timeout`: Hard orchestration deadline (default: `75m`). One iteration reserves planner `15m`, implementer `25m`, reviewer `15m`, and machine checks `2m`; a shorter total fails before planning or writing. Each stage is capped independently instead of inheriting the full remaining deadline. The launcher emits a structured planner heartbeat every 30 seconds by default (`-PlannerHeartbeatInterval` / `--planner-heartbeat-interval`) so a long Sol analysis is observable.
+- `-PlannerIdleTimeout` / `--planner-idle-timeout`: Sol planner no-progress deadline (default: `2m`). Progress means stdout/stderr bytes, plan output file growth, or process-tree CPU activity. On timeout, the launcher terminates the process tree, dumps restricted diagnostics (`planner-stdout.log`, `planner-stderr.log`, `diagnostics.json`, partial plan), and fails closed.
+- `-IdleTimeout` / `--idle-timeout`: Implementer no-progress deadline (default: `8m`). Progress means stdout/stderr bytes, declared-worktree changes, or process-tree CPU growth. Network connectivity alone is not progress.
+- `-GenerationPreflightTimeout` / `--generation-preflight-timeout`: Disposable exact-model generation probe (default: `90s`) performed before the implementation window. Executed on iteration 1; subsequent correction iterations pass `-SkipGenerationPreflight` / `--skip-generation-preflight` to save execution time.
+- `Stage Duration Telemetry`: The launcher collects precise per-stage execution times across all iterations (Planner, Implementer, Parent Verify, Reviewer), emits a structured `SOL_ADVISOR_TELEMETRY` JSON event on stderr, prints an ASCII waterfall table to stdout, and writes `telemetry.json` into the private run directory.
+- `-MaxOwnedFiles` / `--max-owned-files` and `-MaxVerificationCommands` / `--max-verification-commands`: default `12`; oversized plans fail closed and should be split into phases.
+- `-MaxCorrections` / `--max-corrections`: Maximum number of fix-first correction iterations (default: `3`).
+- `-DangerouslySkipPermissions` / `--dangerously-skip-permissions`: Backward-compatible launcher option. The implementer now enables the AGY bypass by default for every Skill run.
+- `-TestMode` / `--test-mode`: Explicit switch required to activate test overrides/fakes.
+- `-TestAgyExe` / `--test-agy-exe`: Executable path override for Antigravity CLI (requires `-TestMode`).
+- `-TestCodexBin` / `--test-codex-bin`: Executable path override for Codex binary (requires `-TestMode`).
 
-The installer is fail-closed and performs its own post-install exactness check. It
-recognizes only byte-exact historical templates, including the shipped v0.2.0 profiles
-and the v0.5.0 Luna/Terra profiles during a v0.5.1 update. Modified/unsafe/nonregular/
-symlinked/conflicting destinations remain refusals, and all mutations are preflighted.
+## 2. Antigravity Implementer Wrapper Usage
 
-The root emits one machine-auditable declaration before its first task tool call:
+The implementer wrapper dispatches a five-part specification directly to Google Antigravity CLI.
 
-~~~text
-SELECTIVE ROUTE
-mode: solo | delegate | audit | full
-risk: <concise, task-specific rationale>
-~~~
+### Windows:
+```powershell
+pwsh .codex/skills/yiwan-sol-advisor/scripts/run-antigravity-implementer.ps1 `
+  -Workspace "C:\path\to\repo" `
+  -SpecFile "C:\path\to\spec.md" `
+  -EvidenceFile "C:\path\to\evidence.json" `
+    [-PrintTimeout "25m"] `
+    [-IdleTimeout "8m"] `
+    [-GenerationPreflightTimeout "90s"] `
+  [-SkipGenerationPreflight] `
+  [-DangerouslySkipPermissions] `
+  [-TestMode] `
+  [-TestAgyExe "C:\path\to\mock_agy.exe"]
+```
 
-Solo is the default. One auxiliary is the default maximum; full is an explicit broad
-or high-risk exception. The root may emit a later declaration only to escalate when
-newly observed risk justifies it. It records that evidence and never silently
-downgrades.
+### POSIX:
+```sh
+sh .codex/skills/yiwan-sol-advisor/scripts/run-antigravity-implementer.sh \
+  --workspace /path/to/repo \
+  --spec-file /path/to/spec.md \
+  --evidence-file /path/to/evidence.json \
+    [--print-timeout 25m] \
+    [--idle-timeout 8m] \
+    [--generation-preflight-timeout 90s] \
+  [--skip-generation-preflight] \
+  [--dangerously-skip-permissions] \
+  [--test-mode] \
+  [--test-agy-exe /path/to/mock_agy]
+```
 
-The existing --check flag verifies all three roles. For task-scoped preflight, check
-only the auxiliaries selected by the declaration; every check is non-mutating and
-fail-closed:
+### Wrapper Guarantees:
+- Verifies target workspace is the exact physical Git root via `git rev-parse --show-toplevel`.
+- Enforces strict five-part specification structure (`OBJECTIVE`, `FILES AND OWNERSHIP`, `INTERFACES`, `CONSTRAINTS`, `VERIFICATION`) with conservative 24 KiB size limit for command-line safety.
+- Rejects relative specification paths, specification paths inside the target workspace, and pre-existing evidence files.
+- Rejects symbolic links, junctions, reparse points in directory ancestors, alternate data streams (ADS `:`), and device namespaces.
+- Requires native `agy.exe` on Windows (rejects `.cmd`/`.bat` wrappers).
+- Verifies model `gemini-3.8-flash-high` availability via `agy models`.
+- Verifies actual generation with a nonce-bound request in a disposable temporary directory before any workspace write (skippable via `-SkipGenerationPreflight` / `--skip-generation-preflight` in subsequent correction iterations once verified).
+- Requires the setup-managed sandbox policy and pins `--new-project --sandbox --dangerously-skip-permissions --model gemini-3.8-flash-high --effort high --mode accept-edits --output-format json`. `--new-project` is required to bind the headless tool CWD to the requested workspace. Runtime version is observed/preflighted but not version-locked. The bypass removes AGY's interactive permission gate, including sandbox-escalation confirmations; parent integrity checks do not eliminate command side effects outside the workspace.
+- Emits `SOL_ADVISOR_HEARTBEAT` records on stderr and kills the complete implementation process tree on idle or hard timeout. Stdout remains reserved for the final JSON payload.
+- Enforces parsed timeout duration with process tree termination on timeout.
+- Validates six-field report contract and evidence of real verification commands with numeric exit codes.
+- Atomically publishes schema version 1 evidence envelope using two-phase private staging with parent directory handle identity verification.
 
-| Route | Required companion checks |
-|---|---|
-| solo | None |
-| delegate (Luna) | `--check --check-role luna` |
-| delegate (Terra) | `--check --check-role terra` |
-| audit | `--check --check-role sol` |
-| full (Luna) | `--check --check-role luna --check-role sol` |
-| full (Terra) | `--check --check-role terra --check-role sol` |
+## 3. Fresh Sol Reviewer Usage
 
-For example:
+The fresh reviewer launches an ephemeral read-only `gpt-5.6-sol` / `max` Codex process to inspect diffs and parent verification evidence. On Windows it starts from an empty disposable execution root and reviews only the bounded evidence bundle; it does not mount the canonical dynamic worktree as its current directory.
 
-~~~sh
-sh plugins/sol-advisor/scripts/install-agents.sh --check --check-role luna
-sh plugins/sol-advisor/scripts/install-agents.sh --check --check-role sol
-~~~
+### Windows:
+```powershell
+pwsh .codex/skills/yiwan-sol-advisor/scripts/run-fresh-reviewer.ps1 `
+  -Workspace "C:\path\to\repo" `
+  -GoalFile "C:\path\to\task.md" `
+  -EvidenceFile "C:\path\to\evidence.json" `
+  -ParentVerificationFile "C:\path\to\parent-verification.json" `
+  -ReviewOutputFile "C:\path\to\review.json" `
+  [-Timeout "15m"] `
+  [-TestMode] `
+  [-TestCodexBin "C:\path\to\mock_codex.exe"]
+```
 
-Unknown or missing role arguments fail before any destination mutation. A selective
-check ignores unselected role destinations, while the all-role --check behavior
-remains unchanged. Cache successful checks only for the task; never carry them across
-later tasks, installation/update, or routing/configuration changes.
+### POSIX:
+```sh
+sh .codex/skills/yiwan-sol-advisor/scripts/run-fresh-reviewer.sh \
+  --workspace /path/to/repo \
+  --goal-file /path/to/task.md \
+  --evidence-file /path/to/evidence.json \
+  --parent-verification-file /path/to/parent-verification.json \
+  --review-output-file /path/to/review.json \
+  [--timeout 15m] \
+  [--test-mode] \
+  [--test-codex-bin /path/to/mock_codex]
+```
 
-Luna / Max is for bounded, fully specified work. Terra / High is selected for
-judgment-heavy, high-risk, context-heavy, or wide-blast-radius work. A Luna result
-may justify a declared Terra escalation only when it shows newly observed risk. One
-corrected Luna attempt is reserved for a specification error and is not a prerequisite
-for Terra.
+### Reviewer Guarantees:
+- Captures pre-review repository state with streaming SHA-256 hashes of all tracked, staged, and untracked file contents.
+- Supplies staged diff (`git diff --cached --binary`) and unstaged diff (`git diff --binary`) separately within fail-closed limits (total diff <= 2MB, untracked text <= 1MB).
+- Requires independent parent verification artifact as input with strict schema version 1 verification.
+- Strictly binds and echoes all 9 cryptographic digests (`task_sha256`, `plan_sha256`, `spec_sha256`, `implementer_evidence_sha256`, `parent_verification_sha256`, `pre_window_manifest_sha256`, `post_window_manifest_sha256`, `repository_manifest_sha256`, `aggregate_delta_manifest_sha256`).
+- Executes `codex exec` with `-m gpt-5.6-sol -s read-only --ephemeral`; it intentionally omits a `model_reasoning_effort` override so the user's current Codex configuration selects the tier.
+- For independent acceptance evidence on Windows, pass `-TrustedVerificationScript <absolute-path-outside-workspace>`. The caller owns and audits this script; planner suggestions are never promoted to trusted commands automatically. The launcher records stdout, stderr, SHA-256, and the observed exit code, and fails if the verifier mutates the repository.
+- On Windows, the planner inspects a disposable local Git mirror populated with the canonical tracked and non-ignored working-tree view. This avoids `CreateProcessWithLogonW failed: 267` / access-denied failures caused by restricted AppContainer traversal of dynamic worktrees without weakening the Sol sandbox.
+- If Codex reports an account usage limit, orchestration stops with a concise no-fallback diagnostic. Wait for the stated reset; do not substitute another planner/reviewer model.
+- Enforces timeout duration and kills subprocess tree on expiry.
+- Captures post-review repository content manifest and proves repository remained completely unmodified.
+- Validates structured JSON verdict (`SHIP`, `FIX-FIRST`, `RETHINK`).
+- Atomically publishes review envelope to `-ReviewOutputFile`.
 
-If public metadata omits model or effort, use the local inspector below as a fallback
-for those omitted fields only. Do not use it to replace available public evidence.
+## 4. Verification and Self-Tests
 
-## Runtime routing evidence
+Run the bundled test suites to verify skill integrity:
 
-The public spawn/details record is authoritative for the selected role and any exposed
-model/effort. When model or effort is omitted, resolve the helper relative to the
-installed skill and inspect the exact native thread ID:
+### Windows:
+```powershell
+pwsh -NoProfile -File .codex/skills/yiwan-sol-advisor/scripts/verify-skill.ps1
+```
 
-~~~sh
-skill_dir=<directory-containing-this-SKILL.md>
-runtime_inspector="$skill_dir/../../scripts/inspect-agent-runtime.sh"
-sh "$runtime_inspector" <native-subagent-thread-id>
-~~~
+### POSIX / Linux / WSL:
+```sh
+sh .codex/skills/yiwan-sol-advisor/scripts/verify-skill.sh
+```
 
-For a disposable fixture or non-default session root:
+### Individual Verification Checks:
+1. **Skill Quick Validation**:
+   ```powershell
+   python "C:\Users\Administrator\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "C:\Users\Administrator\.codex\skills\yiwan-sol-advisor"
+   ```
+2. **Git Diff Syntax Check**:
+   ```powershell
+   git -C "C:\Users\Administrator\.codex\skills\yiwan-sol-advisor" diff --check
+   ```
+3. **PowerShell Script Syntax / AST Check**:
+   ```powershell
+   Get-ChildItem -Path "C:\Users\Administrator\.codex\skills\yiwan-sol-advisor\scripts" -Filter "*.ps1" | ForEach-Object {
+       [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$null)
+   }
+   ```
+4. **POSIX Script Syntax (`sh -n`)**:
+   ```sh
+   for f in scripts/*.sh; do sh -n "$f"; done
+   ```
 
-~~~sh
-sh "$runtime_inspector" --sessions-dir /absolute/path/to/sessions <native-subagent-thread-id>
-~~~
+## 5. Maintainer Guarantees and Failure Scope Boundaries
 
-The helper searches one exact rollout filename suffix and emits only allowlisted
-routing fields. It refuses invalid IDs, zero/multiple matches, missing fields, or
-conflicting model/effort/sandbox/permission/working-directory values. It never prints
-prompts, messages, environment variables, tokens, configuration, or arbitrary rollout
-payloads.
+- **Process Interruption and Recovery**: While pre-mutation checks, lockfiles, and transactional staging prevent corrupt partial writes, automatic restoration after installer process interruption is not promised. Unique backup and quarantine recovery artifacts are preserved with timestamped paths for manual recovery.
+- **Filesystem Security Boundaries**: Atomic publication validates physical directory handle identity before moving staged files; however, hostile parent directory replacement after handle validation and power-loss durability are excluded from the userland threat model.
 
-Accepted routing is Luna / max for bounded delegate/full implementation, Terra / high
-for higher-risk delegate/full implementation, and Sol / high for audit/full review.
-If public and local evidence both exist, they must agree. The local inspector is not a
-model-selection fallback.
-
-## Read-only reviewer interpretation
-
-The reviewer TOML requests sandbox_mode = read-only. Capture the observed sandbox
-policy type and permission profile type from public metadata or the inspector:
-
-- Observed read-only sandbox: isolation is enforced.
-- Broader host policy: continue only when hard isolation is not required, the prompt
-  forbids edits, and the parent captures exact before/after repository and artifact
-  state. Report the broader policy and profile as residual risk.
-- Unobservable isolation, required hard isolation, or any mutation: stop the review and
-  do not claim read-only isolation.
-
-A reviewer returns exactly ship, fix-first, or rethink. A fix invalidates the prior
-verdict; parent verification and a new fresh review are required.
-
-## Worker packet and parent acceptance
-
-Every Luna or Terra prompt uses the five-part packet in role-contracts.md:
-
-- OBJECTIVE
-- FILES AND OWNERSHIP
-- INTERFACES
-- CONSTRAINTS
-- VERIFICATION
-
-It must also request the structured implementation report. The parent owns architecture,
-complete diff inspection, verification reruns, correction/escalation decisions, and
-acceptance. Worker claims never replace direct inspection.
-
-In solo, the root plans, implements, tests, and self-reviews with no auxiliary. In
-delegate, one selected Luna or Terra implementer completes the spec and the root
-verifies with no fresh reviewer. In audit, the root implements and verifies, then a
-fresh Sol reviewer reviews. In full, one selected implementer completes the spec, the
-root verifies, and a fresh Sol reviewer reviews. Auxiliary work substitutes for root
-work; it does not duplicate it. A reviewer never fixes its own findings.
-
-## Maintainer verification
-
-From the repository root, run:
-
-~~~sh
-sh plugins/sol-advisor/scripts/verify.sh
-git diff --check
-git status --short
-git diff --stat
-~~~
-
-The verifier covers the v0.6.0 manifest, exact three-role TOMLs, selective-routing
-contracts, concise README journey, absence of retired workflow references, installer
-safety fixtures, Luna runtime evidence, JSON/TOML validity, and shell syntax.

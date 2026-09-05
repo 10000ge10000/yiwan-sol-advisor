@@ -1,4 +1,7 @@
 interface:
   display_name: "Sol Advisor Orchestration"
-  short_description: "Declare a risk-gated solo, delegate, audit, or exceptional full route before task tools"
-  default_prompt: "Use $orchestration to declare a SELECTIVE ROUTE before task tools; default to solo and select delegation, audit, or exceptional full only when risk justifies it."
+  short_description: "Architect and review with Sol at the user's current effort; implement solely with Antigravity CLI."
+  default_prompt: "Use $orchestration to plan this feature with Sol at my current reasoning effort, implement it with Antigravity (Gemini 3.8 Flash High), and verify with fresh Sol review."
+policy:
+  allow_implicit_invocation: false
+
